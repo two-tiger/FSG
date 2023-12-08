@@ -110,3 +110,5 @@ back.txt
 /datasets
 Results
 /*.pdf
+full_precision
+test.ipynb

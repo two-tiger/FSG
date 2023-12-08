@@ -14,7 +14,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 
 from utils.dataset import get_dataloader
-from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple
+from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA
 from meta_utils.SGD import SGD
 from meta_utils.adam import Adam
 from meta_utils.helpers import meta_gradient_generation, update_parameters
@@ -41,7 +41,7 @@ parser.add_argument('--dataset', '-d', type=str, default='CIFAR10', help='Datase
 parser.add_argument('--optimizer', '-o', type=str, default='Adam', help='Optimizer Method')
 parser.add_argument('--quantize', '-q', type=str, default='dorefa', help='Quantization Method')
 parser.add_argument('--exp_spec', '-e', type=str, default='', help='Experiment Specification')
-parser.add_argument('--init_lr', '-lr', type=float, default=1e-3, help='Initial Learning rate')
+parser.add_argument('--init_lr', '-lr', type=float, default=1e-2, help='Initial Learning rate')
 parser.add_argument('--bitW', '-bw', type=int, default=1, help='Quantization Bit')
 parser.add_argument('--meta_type', '-meta', type=str, default='MultiFC', help='Type of Meta Network')
 parser.add_argument('--hidden_size', '-hidden', type=int, default=100,
@@ -98,6 +98,8 @@ if model_name == 'ResNet20':
     net = resnet20_cifar(bitW=bitW)
 elif model_name == 'ResNet32':
     net = resnet32_cifar(bitW=bitW)
+elif model_name == 'ResNet56':
+    net = resnet56_cifar(num_classes=100, bitW=bitW)
 else:
     raise NotImplementedError
 
@@ -121,18 +123,18 @@ test_loader = get_dataloader(dataset_name, 'test', 100)
 ##########################
 # Construct Meta-Network #
 ##########################
-if meta_method == 'LSTMFC':
+if meta_method in ['LSTMFC-Grad', 'LSTMFC', 'LSTMFC-merge','LSTMFC-momentum']:
     meta_net = MetaLSTMFC(hidden_size=hidden_size)
     SummaryPath = '%s/runs-Quant/Meta-%s-Nonlinear-%s-' \
-                  'hidden-size-%d-nlstm-1-%s-%s-%dbits-lr-%s' \
+                  'hidden-size-%d-nlstm-1-%s-%s-%dbits-lr-%s-batchsize-%s' \
                   % (save_root, meta_method, args.meta_nonlinear, hidden_size,
-                     quantized_type, optimizer_type, bitW, lr_adjust)
+                     quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
 elif meta_method in ['FC-Grad']:
     meta_net = MetaFC(hidden_size=hidden_size, use_nonlinear=args.meta_nonlinear)
     SummaryPath = '%s/runs-Quant/Meta-%s-Nonlinear-%s-' \
-                  'hidden-size-%d-%s-%s-%dbits-lr-%s' \
+                  'hidden-size-%d-%s-%s-%dbits-lr-%s-batchsize-%s' \
                   % (save_root, meta_method, args.meta_nonlinear, hidden_size,
-                     quantized_type, optimizer_type, bitW, lr_adjust)
+                     quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
 elif meta_method == 'MultiFC':
     meta_net = MetaDesignedMultiFC(hidden_size=hidden_size,
                                    num_layers = args.num_fc,
@@ -166,6 +168,10 @@ elif meta_method == 'MetaSimple':
     meta_net = MetaSimple()
     SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s' \
                   % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust)
+elif meta_method == 'MetaLSTMLoRA':
+    meta_net = MetaLSTMLoRA(hidden_size=hidden_size)
+    SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s' \
+                  % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
 else:
     raise NotImplementedError
 
@@ -177,6 +183,7 @@ if use_cuda:
 meta_optimizer = optim.Adam(meta_net.parameters(), lr=1e-3, weight_decay=args.weight_decay)
 meta_hidden_state_dict = dict() # Dictionary to store hidden states for all layers for memory-based meta network
 meta_grad_dict = dict() # Dictionary to store meta net output: gradient for origin network's weight / bias
+momentum_dict = dict()
 
 ##################
 # Begin Training #
@@ -239,9 +246,9 @@ for epoch in range(MAX_EPOCH):
         if batch_idx == 0 and epoch == 0:
             pass
         else:
-            meta_grad_dict, meta_hidden_state_dict = \
+            meta_grad_dict, meta_hidden_state_dict, momentum_dict = \
                 meta_gradient_generation(
-                        meta_net, net, meta_method, meta_hidden_state_dict
+                        meta_net, net, meta_method, meta_hidden_state_dict, False, momentum_dict
                 )
             # meta_grad_dict_tosave = {key:value[1].detach().cpu() for key,value in meta_grad_dict.items()}
         # Conduct inference with meta gradient, which is incorporated into the computational graph

@@ -7,11 +7,12 @@ from utils.miscellaneous import get_layer
 import numpy as np
 
 
-def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=None, fix_meta=False):
+def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=None, fix_meta=False, momentum_dict=None):
 
     meta_grad_dict = dict()
     new_meta_hidden_state_dict = dict()
-    layer_name_list = net.layer_name_list
+    new_momentum_dict = dict()
+    layer_name_list = net.layer_name_list # 这里把主网络的层名字都拿出来了
 
     for idx, layer_info in enumerate(layer_name_list):
 
@@ -20,9 +21,9 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
 
         layer = get_layer(net, layer_idx)
 
-        grad = layer.quantized_grads.data
-        pre_quantized_weight = layer.pre_quantized_weight.data
-        bias = layer.bias
+        grad = layer.quantized_grads.data # 这里拿到这一层的梯度 (16,3,3,3)
+        pre_quantized_weight = layer.pre_quantized_weight.data # 这里拿到这一层的权重大小 (16,3,3,3)
+        bias = layer.bias # 这里拿到这一层的偏置
 
         if bias is not None:
             bias_grad = bias.grad.data.clone()
@@ -56,8 +57,8 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
 
         elif meta_method in ['LSTMFC']:
 
-            flatten_grad = grad.data.view(1, -1, 1)
-            flatten_weight = pre_quantized_weight.data.view(1, -1, 1)
+            flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
+            flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
 
             if meta_hidden_state_dict is not None and layer_name in meta_hidden_state_dict:
                 meta_hidden_state = meta_hidden_state_dict[layer_name]
@@ -67,13 +68,90 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             if fix_meta:
                 with torch.no_grad():
                     meta_output, hidden = meta_net(flatten_weight, meta_hidden_state)
+                    # meta_output, hidden = meta_net(flatten_grad, meta_hidden_state)
             else:
                 meta_output, hidden = meta_net(flatten_weight, meta_hidden_state)
+                # meta_output, hidden = meta_net(flatten_grad, meta_hidden_state)
 
             new_meta_hidden_state_dict[layer_name] = tuple(h.detach() for h in hidden)
 
             meta_grad = flatten_grad * meta_output
+            # meta_grad = meta_output
+            
+        elif meta_method in ['LSTMFC-Grad']:
 
+            flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
+            flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
+
+            if meta_hidden_state_dict is not None and layer_name in meta_hidden_state_dict:
+                meta_hidden_state = meta_hidden_state_dict[layer_name]
+            else:
+                meta_hidden_state = None
+
+            if fix_meta:
+                with torch.no_grad():
+                    # meta_output, hidden = meta_net(flatten_weight, meta_hidden_state)
+                    meta_output, hidden = meta_net(flatten_grad, meta_hidden_state)
+            else:
+                # meta_output, hidden = meta_net(flatten_weight, meta_hidden_state)
+                meta_output, hidden = meta_net(flatten_grad, meta_hidden_state)
+
+            new_meta_hidden_state_dict[layer_name] = tuple(h.detach() for h in hidden)
+
+            meta_grad = flatten_grad * meta_output
+            # meta_grad = meta_output
+            
+        elif meta_method in ['LSTMFC-merge']:
+
+            flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
+            flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
+            merge_input = torch.cat((flatten_weight, flatten_grad), dim=0)
+
+            if meta_hidden_state_dict is not None and layer_name in meta_hidden_state_dict:
+                meta_hidden_state = meta_hidden_state_dict[layer_name]
+            else:
+                meta_hidden_state = None
+
+            if fix_meta:
+                with torch.no_grad():
+                    meta_output, hidden = meta_net(merge_input, meta_hidden_state)
+            else:
+                meta_output, hidden = meta_net(merge_input, meta_hidden_state)
+
+            new_meta_hidden_state_dict[layer_name] = tuple(h.detach() for h in hidden)
+
+            meta_grad = flatten_grad * meta_output
+            # meta_grad = meta_output
+
+        elif meta_method == 'MetaLSTMLoRA':
+            
+            flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
+            flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
+            
+            if momentum_dict is not None and layer_name in momentum_dict:
+                momentum = momentum_dict[layer_name]
+            else:
+                momentum = flatten_grad
+                
+            new_momentum = 0.9 * momentum + (1 - 0.9) * flatten_grad
+            new_momentum_dict[layer_name] = new_momentum
+
+            if meta_hidden_state_dict is not None and layer_name in meta_hidden_state_dict:
+                meta_hidden_state = meta_hidden_state_dict[layer_name]
+            else:
+                meta_hidden_state = None
+
+            if fix_meta:
+                with torch.no_grad():
+                    meta_output, hidden = meta_net(momentum, meta_hidden_state)
+            else:
+                meta_output, hidden = meta_net(momentum, meta_hidden_state)
+
+            new_meta_hidden_state_dict[layer_name] = tuple(h.detach() for h in hidden)
+
+            meta_grad = flatten_grad * meta_output
+            # meta_grad = meta_output
+        
         else:
             raise NotImplementedError
 
@@ -88,7 +166,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
         # Assigned pre_quantized_grads with meta grad for weights update
         layer.pre_quantized_grads = meta_grad.data.clone()
 
-    return meta_grad_dict, new_meta_hidden_state_dict
+    return meta_grad_dict, new_meta_hidden_state_dict, new_momentum_dict
 
 
 def update_parameters(net, lr):

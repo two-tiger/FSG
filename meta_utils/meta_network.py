@@ -31,7 +31,8 @@ class MetaLSTMFC(nn.Module):
         else:
             x, (hn1, cn1) = self.lstm1(x, (hidden[0], hidden[1]))
 
-        x = self.fc1(x.view(-1, self.hidden_size))
+        # x = self.fc1(x.view(-1, self.hidden_size))
+        x = self.fc1(hn1.view(-1, self.hidden_size))
 
         return x, (hn1, cn1)
 
@@ -75,9 +76,9 @@ class MetaFC(nn.Module):
     def forward(self, x):
 
         x = self.linear1(x)
-        if self.use_nonlinear is 'relu':
+        if self.use_nonlinear == 'relu':
             x = F.relu(x)
-        elif self.use_nonlinear is 'tanh':
+        elif self.use_nonlinear == 'tanh':
             x = torch.tanh(x)
         x = self.linear2(x)
 
@@ -246,6 +247,29 @@ class MetaTransformer(nn.Module):
         x = x.view(seq_len, 1)  # 将 x 的形状从 (seq_len, 1) 转换回 (seq_len, 1)
         return x
 
+
+class MetaLSTMLoRA(nn.Module):
+    def __init__(self, hidden_size):
+        super(MetaLSTMLoRA, self).__init__()
+        self.hidden_size = hidden_size
+        
+        self.lstm = nn.LSTM(input_size=1, hidden_size=hidden_size)
+        self.fc1 = nn.Linear(in_features=hidden_size, out_features=1)
+        
+
+    def forward(self, x, hidden):
+        """
+        输入梯度g，历史梯度（一阶动量）m
+        输出LoRA分解后的向量，作为梯度矩阵
+        """
+        if hidden is None:
+            x, (hn1, cn1) = self.lstm(x)
+        else:
+            x, (hn1, cn1) = self.lstm(x, (hidden[0], hidden[1]))
+
+        x = self.fc1(x.view(-1, self.hidden_size))
+
+        return x, (hn1, cn1)
 
 def update_parameters(net, lr):
     for param in net.parameters():

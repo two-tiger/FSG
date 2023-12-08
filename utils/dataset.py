@@ -80,7 +80,7 @@ def get_dataloader(dataset_name, split, batch_size, shuffle = True, num_workers=
                 normalize,
             ])
             trainset = CIFAR10_utils.CIFAR100(root=data_root, train=True, download=True,
-                                                    transform=transform_train, ratio=ratio)
+                                                    transform=transform_train)
             print ('Number of training instances used: %d' %(len(trainset)))
             loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=shuffle, num_workers=2)
 

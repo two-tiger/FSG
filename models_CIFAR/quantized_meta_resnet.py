@@ -84,34 +84,62 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion=4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, bitW=1, layer_idx=None, block_idx=None, layer_name_list=None):
         super(Bottleneck, self).__init__()
-        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
+        self.conv1 = conv3x3(inplanes, planes, bitW=bitW)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv2 = conv3x3(planes, planes, stride, bitW=bitW)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, planes*4, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(planes*4)
+        self.conv3 = MetaQuantConv(planes, planes * self.expansion, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
+        
+        self.layer_idx = layer_idx
+        self.block_idx = block_idx
+        layer_name_list.append(['layer%d.%d.conv1' %(self.layer_idx, self.block_idx),
+                                ['layer%d' %self.layer_idx, self.block_idx, 'conv1']])
+        layer_name_list.append(['layer%d.%d.conv2' % (self.layer_idx, self.block_idx),
+                                ['layer%d' %self.layer_idx, self.block_idx, 'conv2']])
+        layer_name_list.append(['layer%d.%d.conv3' % (self.layer_idx, self.block_idx),
+                                ['layer%d' %self.layer_idx, self.block_idx, 'conv3']])
+        
+        assert (self.layer_idx is not None and self.block_idx is not None)
 
-    def forward(self, x):
+    def forward(self, x, quantized_type=None, meta_grad_dict=dict(), lr=1e-3):
         residual = x
-
-        out = self.conv1(x)
+        
+        if 'layer%d.%d.conv1' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+            out = self.conv1(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['layer%d.%d.conv1' %(self.layer_idx, self.block_idx)], lr=lr)
+        else:
+            out = self.conv1(x, quantized_type)
         out = self.bn1(out)
         out = self.relu(out)
 
-        out = self.conv2(out)
+        if 'layer%d.%d.conv2' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+            out = self.conv2(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['layer%d.%d.conv2' %(self.layer_idx, self.block_idx)], lr=lr)
+        else:
+            out = self.conv2(x, quantized_type)
         out = self.bn2(out)
         out = self.relu(out)
 
-        out = self.conv3(out)
+        if 'layer%d.%d.conv3' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+            out = self.conv3(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['layer%d.%d.conv3' %(self.layer_idx, self.block_idx)], lr=lr)
+        else:
+            out = self.conv3(x, quantized_type)
         out = self.bn3(out)
 
         if self.downsample is not None:
-            residual = self.downsample(x)
+            # residual = self.downsample(x)
+            for module in self.downsample:
+                if isinstance(module, MetaQuantConv):
+                    if 'layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+                        residual = module(x = residual, quantized_type=quantized_type, meta_grad=meta_grad_dict['layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx)], lr=lr)
+                    else:
+                        residual = module(residual, quantized_type)
+                else:
+                    residual = module(residual)
 
         out += residual
         out = self.relu(out)
@@ -184,6 +212,74 @@ class ResNet_Cifar(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
 
+        if 'fc' in meta_grad_dict:
+            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], lr = lr)
+        else:
+            x = self.fc(x, quantized_type)
+
+        return x
+
+
+class ResNet(nn.Module):
+    def __init__(self, block, layers, num_classes=1000, first_stride=1, bitW=1):
+        super(ResNet, self).__init__()
+        self.in_channels = 64
+        self.bitW = bitW
+        self.layer_name_list = [['conv1', ['conv1']], ['fc', ['fc']]]
+        
+        self.conv1 = MetaQuantConv(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self._make_layer(block, 64, layers[0], layer_idx=1)
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, layer_idx=2)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, layer_idx=3)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, layer_idx=4)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = MetaQuantLinear(512 * block.expansion, num_classes, bitW=bitW)
+        
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def _make_layer(self, block, out_channels, blocks, stride=1, layer_idx=0):
+        downsample = None
+        if stride != 1 or self.in_channels != out_channels * block.expansion:
+            downsample = nn.Sequential(
+                MetaQuantConv(self.in_channels, out_channels * block.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels * block.expansion),
+            )
+            self.layer_name_list.append(['layer%d.0.downsample.0' %layer_idx,
+                                         ['layer%d' % layer_idx, 0, 'downsample', 0]])
+
+        layers = []
+        layers.append(block(self.in_channels, out_channels, stride, downsample, layer_idx=layer_idx, block_idx=0, bitW=self.bitW,  layer_name_list=self.layer_name_list))
+        self.in_channels = out_channels * block.expansion
+        for blk_idx in range(1, blocks):
+            layers.append(block(self.in_channels, out_channels, layer_idx=layer_idx, block_idx=blk_idx, bitW=self.bitW, layer_name_list=self.layer_name_list))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, quantized_type=None, meta_grad_dict=dict(), lr=1e-3):
+        
+        if 'conv1' in meta_grad_dict:
+            x = self.conv1(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['conv1'], lr=lr)
+        else:
+            x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        
+        for layer in [self.layer1, self.layer2, self.layer3, self.layer4]:
+            for block in layer:
+                x = block(x, quantized_type, meta_grad_dict, lr)
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        
         if 'fc' in meta_grad_dict:
             x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], lr = lr)
         else:
@@ -267,6 +363,22 @@ def resnet164_cifar(**kwargs):
 def resnet1001_cifar(**kwargs):
     model = ResNet_Cifar(Bottleneck, [111, 111, 111], **kwargs)
     return model
+
+# official
+def resnet18(**kwargs):
+    return ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
+
+def resnet34(**kwargs):
+    return ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
+
+def resnet50(**kwargs):
+    return ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+
+def resnet101(**kwargs):
+    return ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
+
+def resnet152(**kwargs):
+    return ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
 
 
 if __name__ == '__main__':

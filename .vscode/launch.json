@@ -17,7 +17,7 @@
                 "-q", "dorefa",
                 "-bw", "1",
                 "-o", "SGD",
-                "-meta", "MultiFC",
+                "-meta", "LSTMFC",
                 "-hidden", "100",
                 "-ad", "30"
             ]
