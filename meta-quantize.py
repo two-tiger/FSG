@@ -83,7 +83,8 @@ lr_adjust = args.lr_adjust
 batch_size = args.batch_size
 bitW = args.bitW
 quantized_type = args.quantize
-save_root = './Results/%s-%s' % (model_name, dataset_name)
+# save_root = './Results/%s-%s' % (model_name, dataset_name)
+save_root = './full_precision/%s-%s' % (model_name, dataset_name)
 # ------------------------------------------
 print(args)
 # input('Take a look')
@@ -284,7 +285,7 @@ for epoch in range(MAX_EPOCH):
         recorder.update(loss=losses.data.item(), acc=accuracy(outputs.data, targets.data, (1,5)),
                         batch_size=outputs.shape[0], cur_lr=optimizee.param_groups[0]['lr'], end=end)
 
-        recorder.print_training_result(batch_idx, len(train_loader))
+        # recorder.print_training_result(batch_idx, len(train_loader))
         end = time.time()
 
     test_acc = test(net, quantized_type=quantized_type, test_loader=test_loader,

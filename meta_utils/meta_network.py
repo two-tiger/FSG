@@ -111,6 +111,35 @@ class MetaMultiFC(nn.Module):
         x = self.linear3(x)
 
         return x
+    
+    
+class MetaLoRAMultiFC(nn.Module):
+    
+    def __init__(self, hidden_size = 10, rank = 4, use_nonlinear=None):
+        super(MetaLoRAMultiFC, self).__init__()
+
+        self.linear1 = nn.Linear(in_features=1, out_features=hidden_size, bias=False)
+        self.linear2 = nn.Linear(in_features=hidden_size, out_features=hidden_size, bias=False)
+        self.linear3 = nn.Linear(in_features=hidden_size, out_features=1, bias=False)
+
+        self.use_nonlinear = use_nonlinear
+        self.rank = rank
+
+    def forward(self, x):
+
+        x = self.linear1(x)
+        if self.use_nonlinear == 'relu':
+            x = F.relu(x)
+        elif self.use_nonlinear == 'tanh':
+            x = torch.tanh(x)
+        x = self.linear2(x)
+        if self.use_nonlinear == 'relu':
+            x = F.relu(x)
+        elif self.use_nonlinear == 'tanh':
+            x = torch.tanh(x)
+        x = self.linear3(x)
+
+        return x
 
 
 class MetaDesignedMultiFC(nn.Module):

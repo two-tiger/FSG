@@ -167,10 +167,10 @@ def train(_net, _train_loader, _optimizer, _criterion, _device = 'cpu', _recorde
         _total += targets.size(0)
         _correct += predicted.eq(targets.data).cpu().sum().item()
 
-        progress_bar(
-            batch_idx, len(_train_loader),
-            'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (_train_loss / (batch_idx + 1), 100. * _correct / _total, _correct, _total)
-        )
+        # progress_bar(
+        #     batch_idx, len(_train_loader),
+        #     'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (_train_loss / (batch_idx + 1), 100. * _correct / _total, _correct, _total)
+        # )
 
         if _recorder is not None:
             _recorder.update(loss=losses.data.item(), acc=[_correct / _total], batch_size=inputs.size(0), is_train=True)
@@ -201,11 +201,11 @@ def test(_net, _test_loader, _criterion, _device = 'cpu', _recorder = None):
         _total += targets.size(0)
         _correct += predicted.eq(targets.data).cpu().sum().item()
 
-        progress_bar(
-            batch_idx,
-            len(_test_loader),
-            'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (_test_loss / (batch_idx + 1), 100. * float(_correct) / _total, _correct, _total)
-        )
+        # progress_bar(
+        #     batch_idx,
+        #     len(_test_loader),
+        #     'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (_test_loss / (batch_idx + 1), 100. * float(_correct) / _total, _correct, _total)
+        # )
 
     if _recorder is not None:
         _recorder.update(loss=_test_loss, acc=[float(_correct) / _total], is_train=False)

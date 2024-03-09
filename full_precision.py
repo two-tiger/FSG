@@ -349,9 +349,9 @@ if not pretrain:
             }
             if not os.path.isdir('%s/checkpoint' % (save_root)):
                 os.mkdir('%s/checkpoint' % (save_root))
-            torch.save(state, '%s/checkpoint/%s_%s_ckpt.t7' % (save_root, model_name, args.optimizer))
+            torch.save(state, '%s/checkpoint/%s_ckpt.t7' % (save_root, model_name))
             best_test_acc = test_acc
-            torch.save(net.state_dict(), '%s/%s-%s-%s-pretrain.pth' % (save_root, model_name, dataset_name, args.optimizer))
+            torch.save(net.state_dict(), '%s/%s-%s-pretrain.pth' % (save_root, model_name, dataset_name))
 
         if args.adjust == 'adaptive':
 
@@ -361,9 +361,9 @@ if not pretrain:
             else:
                 ascent_count += 1
 
-            print('Current Loss: %.3f [%.3f], ascent count: %d' % (train_loss, min_train_loss, ascent_count))
+            print('Current Loss: %.3f [%.3f], ascent count: %d, best_test_acc: %d' % (train_loss, min_train_loss, ascent_count, best_test_acc))
 
-            if ascent_count >= 3:
+            if ascent_count >= 10:
                 optimizer.param_groups[0]['lr'] *= 0.1
                 ascent_count = 0
                 if (optimizer.param_groups[0]['lr']) < (args.lr * 1e-3):

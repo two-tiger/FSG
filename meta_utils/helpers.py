@@ -55,7 +55,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
 
             meta_grad = flatten_grad * meta_output
 
-        elif meta_method in ['LSTMFC']:
+        elif meta_method in ['LSTMFC']: # Meta LSTM Weight
 
             flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
             flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
@@ -78,7 +78,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             meta_grad = flatten_grad * meta_output
             # meta_grad = meta_output
             
-        elif meta_method in ['LSTMFC-Grad']:
+        elif meta_method in ['LSTMFC-Grad']: # Meta LSTM Grad
 
             flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
             flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
@@ -101,7 +101,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             meta_grad = flatten_grad * meta_output
             # meta_grad = meta_output
             
-        elif meta_method in ['LSTMFC-merge']:
+        elif meta_method in ['LSTMFC-merge']: # Meta LSTM weight + grad
 
             flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
             flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
@@ -123,7 +123,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             meta_grad = flatten_grad * meta_output
             # meta_grad = meta_output
 
-        elif meta_method == 'MetaLSTMLoRA':
+        elif meta_method == 'LSTMFC-momentum':
             
             flatten_grad = grad.data.view(1, -1, 1) # (1,432,1)
             flatten_weight = pre_quantized_weight.data.view(1, -1, 1) # (1,432,1)
