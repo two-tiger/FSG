@@ -33,13 +33,13 @@ class MetaMamba(nn.Module):
         self.mamba.act = TaLU()
         # self.mamba_out = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
         
-    def forward(self, x):
+    def forward(self, x, conv_state, ssm_state):
         
-        x = self.mamba(x)
+        x, conv_state, ssm_state = self.mamba.step(x, conv_state, ssm_state)
         
         # x = self.mamba_out(x)
         
-        return x
+        return x, conv_state, ssm_state
 
 class MetaLSTMFC(nn.Module):
 

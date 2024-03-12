@@ -17,7 +17,7 @@ from utils.dataset import get_dataloader
 from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA, MetaMamba
 from meta_utils.SGD import SGD
 from meta_utils.adam import Adam
-from meta_utils.helpers import meta_gradient_generation, update_parameters
+from meta_utils.helpers import meta_gradient_generation, update_parameters, mamba_gradient_generation
 from utils.recorder import Recorder
 from utils.miscellaneous import AverageMeter, accuracy, progress_bar
 from utils.miscellaneous import get_layer
@@ -189,7 +189,9 @@ meta_optimizer = optim.AdamW(meta_net.parameters(), lr=1e-2, weight_decay=args.w
 meta_hidden_state_dict = dict() # Dictionary to store hidden states for all layers for memory-based meta network
 meta_grad_dict = dict() # Dictionary to store meta net output: gradient for origin network's weight / bias
 momentum_dict = dict()
-history_grad = None
+history_grad = dict()
+conv_state_dict = dict()
+ssm_state_dict = dict()
 
 ##################
 # Begin Training #
@@ -252,10 +254,13 @@ for epoch in range(MAX_EPOCH):
         if batch_idx == 0 and epoch == 0:
             pass
         else:
-            meta_grad_dict, meta_hidden_state_dict, momentum_dict, history_grad = \
-                meta_gradient_generation(
-                        meta_net, net, meta_method, meta_hidden_state_dict, False, momentum_dict, history_grad
-                )
+            if meta_method == 'MetaMamba':
+                meta_grad_dict, history_grad, new_conv_state_dict, new_ssm_state_dict = mamba_gradient_generation(meta_net, net, history_grad, conv_state_dict, ssm_state_dict, False)
+            else:
+                meta_grad_dict, meta_hidden_state_dict, momentum_dict, history_grad = \
+                    meta_gradient_generation(
+                            meta_net, net, meta_method, meta_hidden_state_dict, False, momentum_dict, history_grad
+                    )
             # meta_grad_dict_tosave = {key:value[1].detach().cpu() for key,value in meta_grad_dict.items()}
         # Conduct inference with meta gradient, which is incorporated into the computational graph
         outputs = net(
