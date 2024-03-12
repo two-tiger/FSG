@@ -7,7 +7,7 @@ from utils.miscellaneous import get_layer
 import numpy as np
 
 
-def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=None, fix_meta=False, momentum_dict=None):
+def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=None, fix_meta=False, momentum_dict=None, history_grad=None):
 
     meta_grad_dict = dict()
     new_meta_hidden_state_dict = dict()
@@ -157,13 +157,20 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             grad_in = grad.data.view(1, -1, 1)
             weight_in = pre_quantized_weight.data.view(1, -1, 16)
             
+            l = grad_in.shape[1]
+            
+            if history_grad is None:
+                his_grad = grad_in
+            else:
+                his_grad = torch.cat((history_grad, grad_in), 1)
 
             if fix_meta:
                 with torch.no_grad():
-                    meta_output = meta_net(grad_in)
+                    meta_output = meta_net(his_grad)
             else:
-                meta_output = meta_net(grad_in)
+                meta_output = meta_net(his_grad)
 
+            meta_output = meta_output[:, -l, :]
             meta_grad = grad_in * meta_output
             
         
@@ -181,7 +188,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
         # Assigned pre_quantized_grads with meta grad for weights update
         layer.pre_quantized_grads = meta_grad.data.clone()
 
-    return meta_grad_dict, new_meta_hidden_state_dict, new_momentum_dict
+    return meta_grad_dict, new_meta_hidden_state_dict, new_momentum_dict, his_grad
 
 
 def update_parameters(net, lr):

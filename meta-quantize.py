@@ -189,6 +189,7 @@ meta_optimizer = optim.AdamW(meta_net.parameters(), lr=1e-2, weight_decay=args.w
 meta_hidden_state_dict = dict() # Dictionary to store hidden states for all layers for memory-based meta network
 meta_grad_dict = dict() # Dictionary to store meta net output: gradient for origin network's weight / bias
 momentum_dict = dict()
+history_grad = None
 
 ##################
 # Begin Training #
@@ -251,9 +252,9 @@ for epoch in range(MAX_EPOCH):
         if batch_idx == 0 and epoch == 0:
             pass
         else:
-            meta_grad_dict, meta_hidden_state_dict, momentum_dict = \
+            meta_grad_dict, meta_hidden_state_dict, momentum_dict, history_grad = \
                 meta_gradient_generation(
-                        meta_net, net, meta_method, meta_hidden_state_dict, False, momentum_dict
+                        meta_net, net, meta_method, meta_hidden_state_dict, False, momentum_dict, history_grad
                 )
             # meta_grad_dict_tosave = {key:value[1].detach().cpu() for key,value in meta_grad_dict.items()}
         # Conduct inference with meta gradient, which is incorporated into the computational graph
