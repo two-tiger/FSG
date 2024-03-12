@@ -151,6 +151,21 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
 
             meta_grad = flatten_grad * meta_output
             # meta_grad = meta_output
+            
+        elif meta_method == 'MetaMamba':
+            
+            grad_in = grad.data.view(1, -1, 1)
+            weight_in = pre_quantized_weight.data.view(1, -1, 16)
+            
+
+            if fix_meta:
+                with torch.no_grad():
+                    meta_output = meta_net(grad_in)
+            else:
+                meta_output = meta_net(grad_in)
+
+            meta_grad = grad_in * meta_output
+            
         
         else:
             raise NotImplementedError

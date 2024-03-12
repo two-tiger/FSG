@@ -4,6 +4,7 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python: 当前文件",
             "type": "python",
@@ -12,14 +13,15 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "-m", "ResNet32",
-                "-d", "CIFAR10",
+                "-m", "ResNet56",
+                "-d", "CIFAR100",
                 "-q", "dorefa",
                 "-bw", "1",
-                "-o", "SGD",
-                "-meta", "LSTMFC",
+                "-o", "adam",
+                "-meta", "MetaMamba",
                 "-hidden", "100",
-                "-ad", "30"
+                "-lr", "1e-3",
+                "-n", "500"
             ]
         }
     ]

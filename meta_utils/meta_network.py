@@ -11,8 +11,35 @@ from utils.quantize import Function_STE, Function_BWN
 from utils.miscellaneous import progress_bar
 from utils.quantize import quantized_CNN, quantized_Linear
 import utils.global_var as gVar
+from mamba_ssm import Mamba
 
 meta_count = 0
+
+class TaLU(nn.Module):
+    
+    def __init__(self) -> None:
+        super(TaLU, self).__init__()
+        self.tanh = nn.Tanh()
+        
+    def forward(self, x):
+        return x * self.tanh(x)
+
+class MetaMamba(nn.Module):
+    
+    def __init__(self, d_model, d_state, d_conv, expand=4):
+        super(MetaMamba, self).__init__()
+        # self.pre_map = nn.Sequential(nn.Linear(d_model, d_model*expand), nn.Tanh(), nn.Linear(d_model*expand, d_model), nn.Tanh())
+        self.mamba = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba.act = TaLU()
+        # self.mamba_out = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        
+    def forward(self, x):
+        
+        x = self.mamba(x)
+        
+        # x = self.mamba_out(x)
+        
+        return x
 
 class MetaLSTMFC(nn.Module):
 

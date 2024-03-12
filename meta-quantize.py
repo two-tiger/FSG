@@ -14,7 +14,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 
 from utils.dataset import get_dataloader
-from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA
+from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA, MetaMamba
 from meta_utils.SGD import SGD
 from meta_utils.adam import Adam
 from meta_utils.helpers import meta_gradient_generation, update_parameters
@@ -83,8 +83,8 @@ lr_adjust = args.lr_adjust
 batch_size = args.batch_size
 bitW = args.bitW
 quantized_type = args.quantize
-# save_root = './Results/%s-%s' % (model_name, dataset_name)
-save_root = './full_precision/%s-%s' % (model_name, dataset_name)
+save_root = './Results/%s-%s' % (model_name, dataset_name)
+# save_root = './full_precision/%s-%s' % (model_name, dataset_name)
 # ------------------------------------------
 print(args)
 # input('Take a look')
@@ -173,6 +173,10 @@ elif meta_method == 'MetaLSTMLoRA':
     meta_net = MetaLSTMLoRA(hidden_size=hidden_size)
     SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s' \
                   % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
+elif meta_method == 'MetaMamba':
+    meta_net = MetaMamba(d_model=1, d_state=16, d_conv=4, expand=100)
+    SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s' \
+                  % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
 else:
     raise NotImplementedError
 
@@ -181,7 +185,7 @@ print(meta_net)
 if use_cuda:
     meta_net.cuda()
 
-meta_optimizer = optim.Adam(meta_net.parameters(), lr=1e-3, weight_decay=args.weight_decay)
+meta_optimizer = optim.AdamW(meta_net.parameters(), lr=1e-2, weight_decay=args.weight_decay)
 meta_hidden_state_dict = dict() # Dictionary to store hidden states for all layers for memory-based meta network
 meta_grad_dict = dict() # Dictionary to store meta net output: gradient for origin network's weight / bias
 momentum_dict = dict()
@@ -287,9 +291,11 @@ for epoch in range(MAX_EPOCH):
 
         # recorder.print_training_result(batch_idx, len(train_loader))
         end = time.time()
-
+        
+    
     test_acc = test(net, quantized_type=quantized_type, test_loader=test_loader,
                     dataset_name=dataset_name, n_batches_used=None)
+    recorder.get_best_test_acc()
     recorder.update(loss=None, acc=test_acc, batch_size=0, end=None, is_train=False)
 
     # Adjust learning rate
