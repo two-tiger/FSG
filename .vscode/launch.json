@@ -13,12 +13,12 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "-m", "ResNet56",
-                "-d", "CIFAR100",
+                "-m", "ResNet44",
+                "-d", "CIFAR10",
                 "-q", "dorefa",
                 "-bw", "1",
                 "-o", "adam",
-                "-meta", "MetaMamba",
+                "-meta", "MetaMambaHistory",
                 "-hidden", "100",
                 "-lr", "1e-3",
                 "-n", "500"

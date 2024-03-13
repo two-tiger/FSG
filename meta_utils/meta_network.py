@@ -30,7 +30,6 @@ class MetaMamba(nn.Module):
         super(MetaMamba, self).__init__()
         # self.pre_map = nn.Sequential(nn.Linear(d_model, d_model*expand), nn.Tanh(), nn.Linear(d_model*expand, d_model), nn.Tanh())
         self.mamba = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-        self.mamba.act = TaLU()
         # self.mamba_out = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
         
     def forward(self, x, conv_state, ssm_state):
@@ -40,6 +39,24 @@ class MetaMamba(nn.Module):
         # x = self.mamba_out(x)
         
         return x, conv_state, ssm_state
+    
+    
+class MetaMambaHistory(nn.Module):
+    
+    def __init__(self, d_model, d_state, d_conv, expand=4):
+        super(MetaMambaHistory, self).__init__()
+        # self.pre_map = nn.Sequential(nn.Linear(d_model, d_model*expand), nn.Tanh(), nn.Linear(d_model*expand, d_model), nn.Tanh())
+        self.mamba = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        # self.mamba_out = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        
+    def forward(self, x):
+        
+        x = self.mamba(x)
+        
+        # x = self.mamba_out(x)
+        
+        return x
+    
 
 class MetaLSTMFC(nn.Module):
 

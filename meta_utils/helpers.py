@@ -152,7 +152,7 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             meta_grad = flatten_grad * meta_output
             # meta_grad = meta_output
             
-        elif meta_method == 'MetaMamba':
+        elif meta_method == 'MetaMambaHistory':
             
             grad_in = grad.data.view(-1, 1, 1)
             weight_in = pre_quantized_weight.data.view(1, -1, 16)
@@ -161,10 +161,10 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
             
             if history_grad is not None and layer_name in history_grad:
                 his_grad = history_grad[layer_name]
-                if his_grad.shape[1] == 2:
+                if his_grad.shape[1] == 5:
                     his_grad = torch.cat((his_grad[:,1:,:], grad_in), 1)
                 else:
-                    his_grad = torch.cat((his_grad, grad_in), 0)
+                    his_grad = torch.cat((his_grad, grad_in), 1)
             else:
                 his_grad = grad_in
                 
@@ -172,12 +172,13 @@ def meta_gradient_generation(meta_net, net, meta_method, meta_hidden_state_dict=
 
             if fix_meta:
                 with torch.no_grad():
-                    meta_output, conv_state, ssm_state = meta_net(his_grad, conv_state, ssm_state)
+                    meta_output = meta_net(his_grad)
             else:
-                meta_output, conv_state, ssm_state = meta_net(his_grad, conv_state, ssm_state)
+                meta_output = meta_net(his_grad)
 
-            meta_output = meta_output[:, -1, :]
-            meta_grad = grad_in * meta_output
+            meta_output = meta_output[:, -1, :].unsqueeze(1)
+            # meta_grad = grad_in * meta_output
+            meta_grad = meta_output
             
         
         else:
@@ -257,7 +258,8 @@ def mamba_gradient_generation(meta_net, net, history_grad=None, conv_state_dict=
         new_ssm_state_dict[layer_name] = tuple(h.detach() for h in ssm_state)
         
         # meta_output = meta_output[:, -1, :]
-        meta_grad = grad_in * meta_output
+        # meta_grad = grad_in * meta_output
+        meta_grad = meta_output
             
 
         # Reshape the flattened meta gradient into the original shape

@@ -7,6 +7,7 @@ import shutil
 import pickle
 import time
 import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -14,7 +15,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 
 from utils.dataset import get_dataloader
-from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA, MetaMamba
+from meta_utils.meta_network import MetaFC, MetaLSTMFC, MetaDesignedMultiFC, MetaMultiFC, MetaCNN, MetaTransformer, MetaMultiFCBN, MetaSimple, MetaLSTMLoRA, MetaMamba, MetaMambaHistory
 from meta_utils.SGD import SGD
 from meta_utils.adam import Adam
 from meta_utils.helpers import meta_gradient_generation, update_parameters, mamba_gradient_generation
@@ -26,7 +27,7 @@ from utils.quantize import test
 ##################
 # Import Network #
 ##################
-from models_CIFAR.quantized_meta_resnet import resnet20_cifar, resnet20_stl, resnet56_cifar, resnet32_cifar
+from models_CIFAR.quantized_meta_resnet import resnet20_cifar, resnet20_stl, resnet56_cifar, resnet32_cifar, resnet44_cifar
 # from models_ImageNet.quantized_meta_resnet import resnet18, resnet34, resnet50
 
 import argparse
@@ -101,6 +102,8 @@ elif model_name == 'ResNet32':
     net = resnet32_cifar(bitW=bitW)
 elif model_name == 'ResNet56':
     net = resnet56_cifar(num_classes=100, bitW=bitW)
+elif model_name == 'ResNet44':
+    net = resnet44_cifar(bitW=bitW)
 else:
     raise NotImplementedError
 
@@ -177,6 +180,10 @@ elif meta_method == 'MetaMamba':
     meta_net = MetaMamba(d_model=1, d_state=16, d_conv=4, expand=100)
     SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s' \
                   % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
+elif meta_method == 'MetaMambaHistory':
+    meta_net = MetaMambaHistory(d_model=1, d_state=16, d_conv=4, expand=100)
+    SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s' \
+                  % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
 else:
     raise NotImplementedError
 
@@ -242,6 +249,8 @@ for epoch in range(MAX_EPOCH):
     end = time.time()
 
     recorder.reset_performance()
+    
+    train_loader = tqdm(train_loader, total=len(train_loader))
 
     for batch_idx, (inputs, targets) in enumerate(train_loader):
 
