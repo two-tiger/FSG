@@ -155,10 +155,10 @@ class Adam(Optimizer):
                     # grad.add_(group['weight_decay'], p.data)
                     grad.add_(p.data, alpha=group['weight_decay'])
 
-                # Decay the first and second moment running average coefficient
+                # Decay the first and second moment running average coefficient 一阶动量
                 # exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                # exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                # exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad) 二阶动量 _有下划线的是原位操作，会直接修改张量的值
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 if amsgrad:
                     # Maintains the maximum of all 2nd moment running avg. till now

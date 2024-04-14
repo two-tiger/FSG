@@ -4,25 +4,36 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
-            "name": "Python: 当前文件",
+            "name": "meta-quantize",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
+            "program": "meta-quantize.py",
             "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "args": [
-                "-m", "ResNet44",
-                "-d", "CIFAR10",
-                "-q", "dorefa",
-                "-bw", "1",
-                "-o", "adam",
-                "-meta", "MetaMambaHistory",
-                "-hidden", "100",
-                "-lr", "1e-3",
-                "-n", "500"
-            ]
+                "-m",
+                "ResNet44",
+                "-d",
+                "CIFAR10",
+                "-q",
+                "dorefa",
+                "-bw",
+                "1",
+                "-o",
+                "adam",
+                "-meta",
+                "MetaFastAndSlow",
+                "-hidden",
+                "100",
+                "-lr",
+                "1e-3",
+                "-n",
+                "100"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"
+            },
         }
     ]
 }

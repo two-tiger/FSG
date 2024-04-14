@@ -65,7 +65,7 @@ class MetaQuantConv(nn.Module):
             self.pre_quantized_grads = grad
         return hook
 
-    def forward(self, x, quantized_type = None, meta_grad = None, lr = 1e-3):
+    def forward(self, x, quantized_type = None, meta_grad = None, slow_grad = None, lr = 1e-3):
 
         # 校准
         if quantized_type == 'dorefa':
@@ -85,9 +85,16 @@ class MetaQuantConv(nn.Module):
             # calibrated grads are gradients for original weights before any optimization acceleration technique
             self.calibrated_grads = meta_grad[1] * self.calibration
             # To incorprate meta network into original network's inference
-            self.meta_weight = self.weight - \
-                                           lr * (self.calibrated_grads \
-                                   + (self.weight.grad.data - self.calibrated_grads.data).detach())
+            if slow_grad is None:
+                self.meta_weight = self.weight - \
+                                            lr * (self.calibrated_grads \
+                                    + (self.weight.grad.data - self.calibrated_grads.data).detach())
+            else:
+                # 带momentum的SGD
+                self.meta_weight = self.weight - lr * (0.9 * slow_grad[1] + (1 - 0.9) * self.calibrated_grads)
+                
+                # Adam 的更新规则
+                # self.meta_weight = self.weight - lr * (self.calibrated_grads / (torch.sqrt(slow_grad[1] ** 2) + 1e-6))
 
         else:
             self.meta_weight = self.weight * 1.0
@@ -181,7 +188,7 @@ class MetaQuantLinear(nn.Module):
         return hook
 
 
-    def forward(self, x, quantized_type = None, meta_grad = None, lr=1e-3):
+    def forward(self, x, quantized_type = None, meta_grad = None, slow_grad = None, lr=1e-3):
 
         if quantized_type == 'dorefa':
             self.calibration = 1.0 / (torch.max(torch.abs(torch.tanh(self.weight.data))).detach()) \
@@ -195,9 +202,15 @@ class MetaQuantLinear(nn.Module):
 
             self.calibrated_grads = meta_grad[1] * self.calibration
 
-            self.meta_weight = self.weight - \
-                                           lr * (self.calibrated_grads \
-                                   + (self.weight.grad.data - self.calibrated_grads.data).detach())
+            if slow_grad is None:
+                self.meta_weight = self.weight - \
+                                            lr * (self.calibrated_grads \
+                                    + (self.weight.grad.data - self.calibrated_grads.data).detach())
+            else:
+                self.meta_weight = self.weight - lr * (0.9 * slow_grad[1] + (1 - 0.9) * self.calibrated_grads)
+                
+                # Adam 的更新规则
+                # self.meta_weight = self.weight - lr * (self.calibrated_grads / (torch.sqrt(slow_grad[1] ** 2) + 1e-6))
 
         else:
             self.meta_weight = self.weight * 1.0
@@ -216,6 +229,7 @@ class MetaQuantLinear(nn.Module):
             temp_weight = torch.tanh(self.meta_weight)
             self.pre_quantized_weight = (temp_weight / torch.max(torch.abs(temp_weight)).detach()) * 0.5 + 0.5
             self.quantized_weight = 2 * Function_STE.apply(self.pre_quantized_weight, self.bitW) - 1
+            # print('The number of quantized weights 1: ', (self.quantized_weight == 1).sum().item())
         elif quantized_type in ['BWN', 'BWN-F']:
             # self.alpha = torch.sum(torch.abs(self.meta_weight.data)) / self.n_elements
             self.alpha = torch.mean(torch.abs(self.meta_weight.data))

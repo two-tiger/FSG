@@ -61,6 +61,8 @@ class Recorder():
             self.train_acc_record = open('%s/%strain-acc.txt' % (self.SummaryPath, prefix), 'w+')
             self.test_acc_record = open('%s/%stest-acc.txt' % (self.SummaryPath, prefix), 'w+')
             self.lr_record = open('%s/%slr.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_best_acc_record = open('%s/%sepoch-best-acc.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_test_acc_record = open('%s/%sepoch-test-acc.txt' % (self.SummaryPath, prefix), 'w+')
         else:
             self.loss_record = open('%s/%sloss.txt' % (self.SummaryPath, prefix), 'w+')
             self.train_top1_acc_record = open('%s/%strain-top1-acc.txt' % (self.SummaryPath, prefix), 'w+')
@@ -104,6 +106,8 @@ class Recorder():
             if self.dataset_type == 'small':
 
                 self.test_acc = acc
+                self.epoch_test_acc_record.write('%d, %.3f\n' % (self.epoch, self.test_acc))
+                self.flush([self.epoch_test_acc_record])
 
                 if self.best_test_acc < self.test_acc:
                     self.best_test_acc = self.test_acc
@@ -164,6 +168,8 @@ class Recorder():
             self.train_acc_record.close()
             self.test_acc_record.close()
             self.lr_record.close()
+            self.epoch_best_acc_record.close()
+            self.epoch_test_acc_record.close()
         else:
             self.loss_record.close()
             self.train_top1_acc_record.close()
@@ -177,6 +183,8 @@ class Recorder():
 
         if self.dataset_type == 'small':
             print('Best test acc: %.3f' %self.best_test_acc)
+            self.epoch_best_acc_record.write('%d, %.3f\n' % (self.epoch, self.best_test_acc))
+            self.flush([self.epoch_best_acc_record])
             return self.best_test_acc
         else:
             print('Best test top1 acc: %.3f, top5 acc: %.3f'

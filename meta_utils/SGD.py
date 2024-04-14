@@ -150,6 +150,15 @@ class SGD(Optimizer):
         # return refinement
 
         # return loss
+        
+    def get_refine_gradient_dual(self, slow_grad):
+        
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                d_p = p.grad.data
+                
 
 
 if __name__ == '__main__':

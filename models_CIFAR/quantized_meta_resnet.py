@@ -42,21 +42,33 @@ class BasicBlock(nn.Module):
 
         assert (self.layer_idx is not None and self.block_idx is not None)
 
-    def forward(self, x, quantized_type = None, meta_grad_dict = dict(), lr=1e-3):
+    def forward(self, x, quantized_type = None, meta_grad_dict = dict(), slow_grad_dict = None, lr=1e-3):
         residual = x
 
-        if 'layer%d.%d.conv1' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+        if 'layer%d.%d.conv1' %(self.layer_idx, self.block_idx) in meta_grad_dict and slow_grad_dict is None:
             out = self.conv1(x = x, quantized_type = quantized_type,
                              meta_grad = meta_grad_dict['layer%d.%d.conv1' %(self.layer_idx, self.block_idx)],
+                             slow_grad = None,
+                             lr = lr)
+        elif 'layer%d.%d.conv1' %(self.layer_idx, self.block_idx) in meta_grad_dict and 'layer%d.%d.conv1' %(self.layer_idx, self.block_idx) in slow_grad_dict:
+            out = self.conv1(x = x, quantized_type = quantized_type,
+                             meta_grad = meta_grad_dict['layer%d.%d.conv1' %(self.layer_idx, self.block_idx)],
+                             slow_grad = slow_grad_dict['layer%d.%d.conv1' %(self.layer_idx, self.block_idx)],
                              lr = lr)
         else:
             out = self.conv1(x, quantized_type)
         out = self.bn1(out)
         out = self.relu(out)
 
-        if 'layer%d.%d.conv2' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+        if 'layer%d.%d.conv2' %(self.layer_idx, self.block_idx) in meta_grad_dict and slow_grad_dict is None:
             out = self.conv2(x = out, quantized_type = quantized_type,
                              meta_grad = meta_grad_dict['layer%d.%d.conv2' %(self.layer_idx, self.block_idx)],
+                             slow_grad = None,
+                             lr = lr)
+        elif 'layer%d.%d.conv2' %(self.layer_idx, self.block_idx) in meta_grad_dict and 'layer%d.%d.conv2' %(self.layer_idx, self.block_idx) in slow_grad_dict:
+            out = self.conv2(x = out, quantized_type = quantized_type,
+                             meta_grad = meta_grad_dict['layer%d.%d.conv2' %(self.layer_idx, self.block_idx)],
+                             slow_grad = slow_grad_dict['layer%d.%d.conv2' %(self.layer_idx, self.block_idx)],
                              lr = lr)
         else:
             out = self.conv2(out, quantized_type)
@@ -66,9 +78,15 @@ class BasicBlock(nn.Module):
             # residual = self.downsample(x)
             for module in self.downsample:
                 if isinstance(module, MetaQuantConv):
-                    if 'layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx) in meta_grad_dict:
+                    if 'layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx) in meta_grad_dict and slow_grad_dict is None:
                         residual = module(x = residual, quantized_type = quantized_type,
                              meta_grad = meta_grad_dict['layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx)],
+                             slow_grad = None,
+                             lr = lr)
+                    elif 'layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx) in meta_grad_dict and 'layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx) in slow_grad_dict:
+                        residual = module(x = residual, quantized_type = quantized_type,
+                             meta_grad = meta_grad_dict['layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx)],
+                             slow_grad = slow_grad_dict['layer%d.%d.downsample.0' %(self.layer_idx, self.block_idx)],
                              lr = lr)
                     else:
                         residual = module(residual, quantized_type)
@@ -196,10 +214,12 @@ class ResNet_Cifar(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def forward(self, x, quantized_type = None, meta_grad_dict = dict(), lr=1e-3):
+    def forward(self, x, quantized_type = None, meta_grad_dict = dict(), slow_grad_dict = None, lr=1e-3):
 
-        if 'conv1' in meta_grad_dict:
-            x = self.conv1(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['conv1'], lr = lr)
+        if 'conv1' in meta_grad_dict and slow_grad_dict is None:
+            x = self.conv1(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['conv1'], slow_grad = None, lr = lr)
+        elif 'conv1' in meta_grad_dict and 'conv1' in slow_grad_dict:
+            x = self.conv1(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['conv1'], slow_grad = slow_grad_dict['conv1'], lr = lr)
         else:
             x = self.conv1(x, quantized_type)
         x = self.bn1(x)
@@ -207,13 +227,16 @@ class ResNet_Cifar(nn.Module):
 
         for layer in [self.layer1, self.layer2, self.layer3]:
             for block in layer:
-                x = block(x, quantized_type, meta_grad_dict,  lr)
+                    x = block(x, quantized_type, meta_grad_dict, slow_grad_dict, lr)
+                    
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
 
-        if 'fc' in meta_grad_dict:
-            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], lr = lr)
+        if 'fc' in meta_grad_dict and slow_grad_dict is None:
+            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], slow_grad = None, lr = lr)
+        elif 'fc' in meta_grad_dict and 'fc' in slow_grad_dict:
+            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], slow_grad = slow_grad_dict['fc'], lr = lr)
         else:
             x = self.fc(x, quantized_type)
 
@@ -227,7 +250,7 @@ class ResNet(nn.Module):
         self.bitW = bitW
         self.layer_name_list = [['conv1', ['conv1']], ['fc', ['fc']]]
         
-        self.conv1 = MetaQuantConv(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = MetaQuantConv(3, 64, kernel_size=7, stride=2, padding=3, bias=False, bitW=bitW)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -249,7 +272,7 @@ class ResNet(nn.Module):
         downsample = None
         if stride != 1 or self.in_channels != out_channels * block.expansion:
             downsample = nn.Sequential(
-                MetaQuantConv(self.in_channels, out_channels * block.expansion, kernel_size=1, stride=stride, bias=False),
+                MetaQuantConv(self.in_channels, out_channels * block.expansion, kernel_size=1, stride=stride, bias=False, bitW=self.bitW),
                 nn.BatchNorm2d(out_channels * block.expansion),
             )
             self.layer_name_list.append(['layer%d.0.downsample.0' %layer_idx,
@@ -263,25 +286,29 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x, quantized_type=None, meta_grad_dict=dict(), lr=1e-3):
+    def forward(self, x, quantized_type=None, meta_grad_dict=dict(), slow_grad_dict = None, lr=1e-3):
         
-        if 'conv1' in meta_grad_dict:
-            x = self.conv1(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['conv1'], lr=lr)
+        if 'conv1' in meta_grad_dict and slow_grad_dict is None:
+            x = self.conv1(x=x, quantized_type=quantized_type, meta_grad=meta_grad_dict['conv1'], slow_grad = None, lr=lr)
+        elif 'conv1' in meta_grad_dict and 'conv1' in slow_grad_dict:
+            x = self.conv1(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['conv1'], slow_grad = slow_grad_dict['conv1'], lr = lr)
         else:
-            x = self.conv1(x)
+            x = self.conv1(x, quantized_type)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
         
         for layer in [self.layer1, self.layer2, self.layer3, self.layer4]:
             for block in layer:
-                x = block(x, quantized_type, meta_grad_dict, lr)
+                x = block(x, quantized_type, meta_grad_dict, slow_grad_dict, lr)
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         
-        if 'fc' in meta_grad_dict:
-            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], lr = lr)
+        if 'fc' in meta_grad_dict and slow_grad_dict is None:
+            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], slow_grad = None, lr = lr)
+        elif 'fc' in meta_grad_dict and 'fc' in slow_grad_dict:
+            x = self.fc(x = x, quantized_type = quantized_type, meta_grad = meta_grad_dict['fc'], slow_grad = slow_grad_dict['fc'], lr = lr)
         else:
             x = self.fc(x, quantized_type)
 
