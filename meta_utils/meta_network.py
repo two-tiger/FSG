@@ -215,6 +215,8 @@ class MetaMambaHistory(nn.Module):
     
     def __init__(self, num_layers, d_model, d_state, d_conv, expand=4):
         super(MetaMambaHistory, self).__init__()
+        self.A = nn.Linear(400, d_model)
+        self.B = nn.Linear(d_model, 400)
         self.layer_embedding = nn.Embedding(num_layers, d_model)
         # self.layer_norm = nn.LayerNorm(1)
         # self.pre_map = nn.Sequential(nn.Linear(d_model, d_model*expand), nn.Tanh(), nn.Linear(d_model*expand, d_model), nn.Tanh())
@@ -227,11 +229,15 @@ class MetaMambaHistory(nn.Module):
         
         # x = self.layer_norm(x)
         
-        idx = torch.LongTensor([layer_idx]).unsqueeze()
+        x = self.A(x)
+        idx = torch.LongTensor([layer_idx]).unsqueeze(0).cuda()
         layer_emb = self.layer_embedding(idx)
         x = torch.cat((layer_emb, x), dim=1)
         
         x = self.mamba(x)
+        x = x[:,1:,:]
+        
+        x = self.B(x)
         
         # x = x + res
         

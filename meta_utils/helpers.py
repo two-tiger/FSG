@@ -426,9 +426,9 @@ def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_m
             grad_in = grad.data.view(1, -1, 1)
             weight_in = pre_quantized_weight.data.view(1, -1, 1)
             
-            padding_size = 200 - grad_in.shape[1] % 200
+            padding_size = 400 - grad_in.shape[1] % 400
             padding_weight = torch.cat([grad_in, torch.zeros(1, padding_size, 1).cuda()], dim=1)
-            grad_in = padding_weight.view(1, -1, 200) # 1, l, 200
+            grad_in = padding_weight.view(1, -1, 400) # 1, l, 200
             
             b,l,d = grad_in.shape
             
@@ -443,16 +443,13 @@ def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_m
                 his_grad = grad_in
                 
             history_grad[layer_name] = his_grad
-
-            print(layer_idx)
-            print(his_grad.shape)
             if fix_meta:
                 with torch.no_grad():
-                    slow_meta_output = slow_meta_net(his_grad)
+                    slow_meta_output = slow_meta_net(his_grad, idx)
             else:
-                slow_meta_output = slow_meta_net(his_grad)
+                slow_meta_output = slow_meta_net(his_grad, idx)
 
-            slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].view(1, -1, 1)[:, :-padding_size, :]
+            slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].reshape(1, -1, 1)[:, :-padding_size, :]
             # slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].view(1, -1, 1)
             # meta_grad = grad_in * slow_meta_output
             slow_meta_grad = slow_meta_output
@@ -557,6 +554,120 @@ def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_m
 
     return fast_meta_grad_dict, slow_meta_grad_dict, history_grad, new_meta_hidden_state_dict
 
+def meta_gradient_lora_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad=None, fix_meta=False, meta_hidden_state_dict=None):
+    fast_meta_grad_dict = dict()
+    slow_meta_grad_dict = dict()
+    new_meta_hidden_state_dict = dict()
+
+    layer_name_list = net.layer_name_list # 这里把主网络的层名字都拿出来了
+
+    for idx, layer_info in enumerate(layer_name_list):
+
+        layer_name = layer_info[0] # 'layer2.6.conv2'
+        layer_idx = layer_info[1] # ['layer2', 6, 'conv2']
+
+        layer = get_layer(net, layer_idx)
+        
+        # grad_A = layer.A_grad.data
+        # grad_B = layer.B_grad.data
+        weight_A = layer.A.data
+        weight_B = layer.B.data
+        try:
+            grad_A = layer.A.grad.data
+            grad_B = layer.B.grad.data
+        except:
+            grad_A = torch.zeros_like(weight_A)
+            grad_B = torch.zeros_like(weight_B)
+        # weight_A = layer.meta_A.data
+        # weight_B = layer.meta_B.data
+
+        # grad = layer.quantized_grads.data # 这里拿到这一层的梯度 (16,3,3,3)
+        # pre_quantized_weight = layer.pre_quantized_weight.data # 这里拿到这一层的权重大小 (16,3,3,3)
+        bias = layer.bias # 这里拿到这一层的偏置
+
+        if bias is not None:
+            try:
+                bias_grad = bias.grad.data.clone()
+            except:
+                bias_grad = torch.zeros_like(bias).cuda()
+        else:
+            bias_grad = None
+            
+        if meta_method in ['MetaFastAndSlow']:
+
+            flatten_grad_A = grad_A.data.view(-1, 1)
+            flatten_grad_B = grad_B.data.view(-1, 1)
+            a, b = flatten_grad_A.shape[0], flatten_grad_B.shape[0]
+            con_grad = torch.cat((flatten_grad_A, flatten_grad_B), dim=0)
+            flatten_weight_A = weight_A.data.view(-1, 1)
+            flatten_weight_B = weight_B.data.view(-1, 1)
+            con_weight = torch.cat((flatten_weight_A, flatten_weight_B), dim=0)
+            
+            # fast meta net
+            if fix_meta:
+                with torch.no_grad():
+                    fast_meta_output = fast_meta_net(con_weight)
+            else:
+                fast_meta_output = fast_meta_net(con_weight)
+            
+            fast_meta_grad = con_grad * fast_meta_output
+            fast_mata_grad_list = [fast_meta_grad[:a,:].reshape(grad_A.shape), fast_meta_grad[-b:,:].reshape(grad_B.shape)]
+            
+            # slow meta net
+            
+            # padding_size = 200 - grad_in.shape[1] % 200
+            # padding_weight = torch.cat([grad_in, torch.zeros(1, padding_size, 1).cuda()], dim=1)
+            # grad_in = padding_weight.view(1, -1, 200) # 1, l, 200
+            
+            grad_A_in = grad_A.data.view(1, -1, 1)
+            grad_B_in = grad_B.data.view(1, -1, 1)
+            la, lb = grad_A_in.shape[1], grad_B_in.shape[1]
+            con_grad_in = torch.cat((grad_A_in, grad_B_in), dim=1)
+            b,l,d = con_grad_in.shape
+            
+            if history_grad is not None and layer_name in history_grad:
+                his_grad = history_grad[layer_name]
+                # new_grad = 0.3 * his_grad + (1 - 0.3) * grad_in
+                if his_grad.shape[1]/l == 5:
+                    his_grad = torch.cat((his_grad[:,-l*4:,:], con_grad_in), 1)
+                else:
+                    his_grad = torch.cat((his_grad, con_grad_in), 1)
+            else:
+                his_grad = con_grad_in
+                
+            history_grad[layer_name] = his_grad
+            
+            if fix_meta:
+                with torch.no_grad():
+                    slow_meta_output = slow_meta_net(his_grad, idx)
+            else:
+                slow_meta_output = slow_meta_net(his_grad, idx)
+
+            slow_meta_output = slow_meta_output[:, -l:, :].view(-1, 1)
+            # meta_grad = grad_in * slow_meta_output
+            slow_meta_grad = con_grad_in * slow_meta_output
+            slow_mata_grad_list = [slow_meta_grad[:,:la,:].reshape(grad_A.shape), slow_meta_grad[:,-lb:,:].reshape(grad_B.shape)]
+            
+        else:
+            raise NotImplementedError
+
+        # Reshape the flattened meta gradient into the original shape
+        # fast_meta_grad = fast_meta_grad.reshape(grad.shape)
+        # slow_meta_grad = slow_meta_grad.reshape(grad.shape)
+
+        if bias is not None:
+            fast_meta_grad_dict[layer_name] = (layer_idx, fast_mata_grad_list, bias_grad.data)
+            slow_meta_grad_dict[layer_name] = (layer_idx, slow_mata_grad_list, bias_grad.data)
+        else:
+            fast_meta_grad_dict[layer_name] = (layer_idx, fast_mata_grad_list, None)
+            slow_meta_grad_dict[layer_name] = (layer_idx, slow_mata_grad_list, None)
+
+        # Assigned pre_quantized_grads with meta grad for weights update
+        # layer.pre_quantized_grads = meta_grad.data.clone()
+
+
+    return fast_meta_grad_dict, slow_meta_grad_dict, history_grad, new_meta_hidden_state_dict
+
 def dual_gradient_generation(meta_net, net, meta_method, history_grad=None, fix_meta=False):
     fast_meta_grad_dict = dict()
     slow_meta_grad_dict = dict()
@@ -630,4 +741,7 @@ def update_parameters(net, lr):
     for param in net.parameters():
         # if torch.sum(torch.abs(param.grad.data)) == 0:
         #     print('[Warning] Gradient is 0, missing assigned?')
-        param.data.add_(-lr * param.grad.data)
+        try:
+            param.data.add_(-lr * param.grad.data)
+        except:
+            pass

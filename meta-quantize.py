@@ -19,6 +19,7 @@ from meta_utils.meta_network import *
 from meta_utils.SGD import SGD
 from meta_utils.adam import Adam
 from meta_utils.helpers import *
+from meta_utils.meta_quantized_module import *
 from utils.recorder import Recorder
 from utils.miscellaneous import AverageMeter, accuracy, progress_bar
 from utils.miscellaneous import get_layer
@@ -66,6 +67,9 @@ parser.add_argument('--lr_adjust', '-ad', type=str,
 parser.add_argument('--batch_size', '-bs', type=int, default=128, help='Batch size')
 parser.add_argument('--weight_decay', '-decay', type=float, default=0,
                     help='Weight decay for training meta quantizer')
+parser.add_argument('--use_lora', action='store_true', default=False)
+parser.add_argument('--checkpoint_dir', type=str, default='./checkpoint')
+parser.add_argument('--break_continue', action='store_true', default=False)
 args = parser.parse_args()
 
 # ------------------------------------------
@@ -85,6 +89,9 @@ batch_size = args.batch_size
 bitW = args.bitW
 quantized_type = args.quantize
 save_root = './Results/%s-%s' % (model_name, dataset_name)
+checkpoint_dir = './checkpoint/%s-%s' % (model_name, dataset_name)
+break_continue = args.break_continue
+use_lora = args.use_lora
 # save_root = './full_precision/%s-%s' % (model_name, dataset_name)
 # ------------------------------------------
 print(args)
@@ -105,26 +112,67 @@ elif model_name == 'ResNet56':
 elif model_name == 'ResNet44':
     net = resnet44_cifar(bitW=bitW)
 elif model_name == 'ResNet18':
-    net = resnet18(bitW=bitW, num_classes=1000)
+    if args.dataset == 'CIFAR10':
+        net = resnet18(bitW=bitW, num_classes=10)
+    elif args.dataset == 'ImageNet':
+        net = resnet18(bitW=bitW, num_classes=1000)
     print(net)
 else:
     raise NotImplementedError
 
 localtime = time.strftime("%m-%d-%H:%M:%S", time.localtime())
 
-if model_name in ['ResNet20', 'ResNet32', 'ResNet56', 'ResNet44']:
+if model_name in ['ResNet20', 'ResNet32', 'ResNet56', 'ResNet44'] and not break_continue:
     pretrain_path = '%s/%s-%s-pretrain.pth' % (save_root, model_name, dataset_name)
     net.load_state_dict(torch.load(pretrain_path, map_location=device), strict=False)
-elif model_name in ['ResNet18']:
+elif model_name in ['ResNet18'] and not break_continue:
+    if args.dataset == 'ImageNet':
+        pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-ImageNet/resnet18-5c106cde.pth'
+        net.load_state_dict(torch.load(pretrain_path, map_location='cpu'), strict=False)
+    elif args.dataset == 'CIFAR10':
+        # pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-CIFAR10/model9509.pkl'
+        # with open(pretrain_path, 'rb') as f:
+        #     checkpoint = pickle.load(f)
+        # net.load_state_dict(checkpoint, strict=False)
+        pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-CIFAR10/ResNet18-CIFAR10-pretrain.pth'
+        net.load_state_dict(torch.load(pretrain_path, map_location='cpu'), strict=False)
+        
     # pretrain_path = '%s/%s.t7' % (save_root, model_name)
-    pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-ImageNet/resnet18-5c106cde.pth'
+    # pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-ImageNet/resnet18-5c106cde.pth'
     # pretrain_path = '/root/bqqi/fscil/MetaQuant/Results/ResNet18-CIFAR10/ResNet18-CIFAR10-pretrain.pth'
-    net.load_state_dict(torch.load(pretrain_path, map_location='cpu'), strict=False)
+    
 
 # Get layer name list
 layer_name_list = net.layer_name_list
 assert (len(layer_name_list) == gVar.meta_count)
 print('Layer name list completed.')
+
+if use_lora:
+    for param in net.parameters():
+        param.requires_grad = False
+    for layer_info in layer_name_list:
+        layer_name = layer_info[0]
+        layer_idx = layer_info[1] # ['layer2', 6, 'conv2']
+        
+        if len(layer_idx) == 3:
+            layer = getattr(net, layer_idx[0])
+            block = layer[layer_idx[1]]
+            sublayer = getattr(block, layer_idx[2])
+            setattr(block, layer_idx[2], MetaQuantConvWithLoRA.from_object(sublayer.in_channels, sublayer.out_channels, sublayer.kernel_size, sublayer.stride, sublayer.padding, sublayer.dilation, sublayer.groups, False, bitW, rank=8, alpha_lora=16, in_obj=sublayer))
+        elif len(layer_idx) == 4:
+            layer = getattr(net, layer_idx[0])
+            block = layer[layer_idx[1]]
+            sublayers = getattr(block, layer_idx[2])
+            sublayer = sublayers[layer_idx[3]]
+            sublayers[layer_idx[3]] = MetaQuantConvWithLoRA.from_object(sublayer.in_channels, sublayer.out_channels, sublayer.kernel_size, sublayer.stride, sublayer.padding, sublayer.dilation, sublayer.groups, False, bitW, rank=8, alpha_lora=16, in_obj=sublayer)
+        elif len(layer_idx) == 1:
+            sublayer = getattr(net, layer_idx[0])
+        
+            if 'fc' in layer_idx[0]:
+                setattr(net, layer_idx[0], MetaQuantLinearWithLoRA.from_object(sublayer.in_features, sublayer.out_features, bitW=bitW, rank=8, alpha_lora=16, in_obj=sublayer))
+            else:
+                setattr(net, layer_idx[0], MetaQuantConvWithLoRA.from_object(sublayer.in_channels, sublayer.out_channels, sublayer.kernel_size, sublayer.stride, sublayer.padding, sublayer.dilation, sublayer.groups, False, bitW, rank=8, alpha_lora=16, in_obj=sublayer))
+    
 
 if use_cuda:
     # net = nn.DataParallel(net).cuda()
@@ -217,7 +265,7 @@ elif meta_method == 'MetaS5Fusion':
     SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s-%s' \
                   % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH, localtime)
 elif meta_method == 'MetaFastAndSlow':
-    slow_meta_net = MetaMambaHistory(num_layers=len(layer_name_list), d_model=200, d_state=16, d_conv=8, expand=100)
+    slow_meta_net = MetaMambaHistory(num_layers=len(layer_name_list), d_model=1, d_state=16, d_conv=8, expand=100)
     fast_meta_net = MetaMultiFC(hidden_size=hidden_size, use_nonlinear=args.meta_nonlinear)
     # slow_meta_net = nn.DataParallel(slow_meta_net)
     # fast_meta_net = nn.DataParallel(fast_meta_net)
@@ -280,6 +328,33 @@ elif optimizer_type in ['adam', 'Adam']:
 else:
     raise NotImplementedError
 
+start_epoch = 0
+if break_continue:
+    # net continue learning
+    net_checkpoint_path = '%s/net_checkpoint.pth' % (checkpoint_dir)
+    # 判断该文件是否存在，如果存在则torch.load()读取
+    if os.path.exists(net_checkpoint_path):
+        net_checkpoint = torch.load(net_checkpoint_path, map_location=device)
+        start_epoch = net_checkpoint['epoch']
+        net.load_state_dict(net_checkpoint['model_state_dict'])
+        optimizee.load_state_dict(net_checkpoint['optimizer_state_dict'])
+        for layer_info in layer_name_list:
+            layer_name = layer_info[0]
+            layer_idx = layer_info[1]
+            layer = get_layer(net, layer_idx)
+            layer.quantized_grads = net_checkpoint[layer_name]
+            layer.pre_quantized_weight = net_checkpoint[layer_name]
+    slow_checkpoint = '%s/slow_checkpoint.pth' % (checkpoint_dir)
+    if os.path.exists(slow_checkpoint):
+        slow_checkpoint = torch.load(slow_checkpoint, map_location=device)
+        slow_meta_net.load_state_dict(slow_checkpoint['model_state_dict'])
+        slow_meta_optimizer.load_state_dict(slow_checkpoint['optimizer_state_dict'])
+    fast_checkpoint = '%s/fast_checkpoint.pth' % (checkpoint_dir)
+    if os.path.exists(fast_checkpoint):
+        fast_checkpoint = torch.load(fast_checkpoint, map_location=device)
+        fast_meta_net.load_state_dict(fast_checkpoint['model_state_dict'])
+        fast_meta_optimizer.load_state_dict(fast_checkpoint['optimizer_state_dict'])
+
 ####################
 # Initial Recorder #
 ####################
@@ -302,7 +377,7 @@ recorder = Recorder(SummaryPath=SummaryPath, dataset_name=dataset_name)
 # Begin Training #
 ##################
 meta_grad_dict = dict()
-for epoch in range(MAX_EPOCH):
+for epoch in range(start_epoch, MAX_EPOCH):
 
     if recorder.stop: break
 
@@ -333,7 +408,10 @@ for epoch in range(MAX_EPOCH):
             if meta_method in ['MetaMamba', 'MetaS4']:
                 meta_grad_dict, history_grad, conv_state_dict, ssm_state_dict, s4_state_dict = metassm_gradient_generation(meta_net, net, meta_method, history_grad, conv_state_dict, ssm_state_dict, s4_state_dict, False)
             elif meta_method in ['MetaFastAndSlow', 'MetaFastAndLSTM', 'MetaMambaAndFC']:
-                fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict)
+                if use_lora:
+                    fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_gradient_lora_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict)
+                else:
+                    fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict)
             elif meta_method in ['MetaDualGrad']:
                 fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = dual_gradient_generation(meta_net, net, meta_method, history_grad, False)
             else:
@@ -371,20 +449,41 @@ for epoch in range(MAX_EPOCH):
 
         # Assign meta gradient for actual gradients used in update_parameters
         if meta_method in ['MetaFastAndSlow', 'MetaFastAndLSTM', 'MetaMambaAndFC', 'MetaDualGrad']:
-            if len(fast_meta_grad_dict) != 0:
-                for layer_info in net.layer_name_list:
-                    layer_name = layer_info[0]
-                    layer_idx = layer_info[1]
-                    layer = get_layer(net, layer_idx)
-                    layer.weight.grad.data = (
-                        layer.calibration * fast_meta_grad_dict[layer_name][1].data
-                    )
+            if use_lora:
+                if len(fast_meta_grad_dict) != 0:
+                    for layer_info in net.layer_name_list:
+                        layer_name = layer_info[0]
+                        layer_idx = layer_info[1]
+                        layer = get_layer(net, layer_idx)
+                        try:
+                            layer.weight.grad.data = (
+                                layer.delta_w
+                            )
+                            layer.A.grad.data = (fast_meta_grad_dict[layer_name][1][0] * layer.calibration_A)
+                            layer.B.grad.data = (fast_meta_grad_dict[layer_name][1][1] * layer.calibration_B)
+                        except:
+                            pass
 
-                # Get refine gradients for actual parameters update
-                optimizee.get_refine_gradient()
+                    # Get refine gradients for actual parameters update
+                    optimizee.get_refine_gradient()
 
-                # Actual parameters update using the refined gradient from meta gradient
-                update_parameters(net, lr=optimizee.param_groups[0]['lr'])
+                    # Actual parameters update using the refined gradient from meta gradient
+                    update_parameters(net, lr=optimizee.param_groups[0]['lr'])
+            else:
+                if len(fast_meta_grad_dict) != 0:
+                    for layer_info in net.layer_name_list:
+                        layer_name = layer_info[0]
+                        layer_idx = layer_info[1]
+                        layer = get_layer(net, layer_idx)
+                        layer.weight.grad.data = (
+                            layer.calibration * fast_meta_grad_dict[layer_name][1].data
+                        )
+
+                    # Get refine gradients for actual parameters update
+                    optimizee.get_refine_gradient()
+
+                    # Actual parameters update using the refined gradient from meta gradient
+                    update_parameters(net, lr=optimizee.param_groups[0]['lr'])
         else:
             if len(meta_grad_dict) != 0:
                 for layer_info in net.layer_name_list:
@@ -407,7 +506,31 @@ for epoch in range(MAX_EPOCH):
         # recorder.print_training_result(batch_idx, len(train_loader))
         end = time.time()
         
-    
+    net_checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': net.state_dict(),
+        'optimizer_state_dict': optimizee.state_dict(),
+    }
+    for layer_info in layer_name_list:
+        layer_name = layer_info[0]
+        layer_idx = layer_info[1]
+        layer = get_layer(net, layer_idx)
+        net_checkpoint[layer_name+'quantized_grads'] = layer.quantized_grads
+        net_checkpoint[layer_name+'pre_quantized_weight'] = layer.pre_quantized_weight
+        net_checkpoint[layer_name+'bias_grad'] = layer.bias_grad
+    torch.save(net_checkpoint, '%s/net_checkpoint.pth' % checkpoint_dir)
+    slow_checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': slow_meta_net.state_dict(),
+        'optimizer_state_dict': slow_meta_optimizer.state_dict(),
+    }
+    torch.save(slow_checkpoint, '%s/slow_checkpoint.pth' % checkpoint_dir)
+    fast_checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': fast_meta_net.state_dict(),
+        'optimizer_state_dict': fast_meta_optimizer.state_dict(),
+    }
+    torch.save(fast_checkpoint, '%s/fast_checkpoint.pth' % checkpoint_dir)
     # if epoch % 5 == 0:
     #     draw_weight_distribution(net, epoch)
     test_acc = test(net, quantized_type=quantized_type, test_loader=test_loader,

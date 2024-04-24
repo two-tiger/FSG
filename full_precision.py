@@ -251,6 +251,9 @@ def resnet20(num_classes):
 def resnet32(num_classes):
     return ResNetReduce(BasicBlock, [5, 5, 5], num_classes=num_classes)
 
+def resnet44(num_classes):
+    return ResNetReduce(BasicBlock, [7, 7, 7], num_classes=num_classes)
+
 def resnet56(num_classes):
     return ResNetReduce(BasicBlock, [9, 9, 9], num_classes=num_classes)
 
@@ -371,6 +374,8 @@ elif model_name == 'ResNet20':
     net = resnet20(num_classes=num_classes)
 elif model_name == 'ResNet32':
     net = resnet32(num_classes=num_classes)
+elif model_name == 'ResNet44':
+    net = resnet44(num_classes=num_classes)
 elif model_name == 'ResNet56':
     net = resnet56(num_classes=num_classes)
 else:

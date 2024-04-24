@@ -117,3 +117,5 @@ S4
 S4Torch-main
 visualization
 mamba_ssm-1.2.0.post1+cu118torch2.0cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+
+checkpoint/

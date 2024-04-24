@@ -70,6 +70,10 @@ class Recorder():
             self.test_top1_acc_record = open('%s/%stest-top1-acc.txt' % (self.SummaryPath, prefix), 'w+')
             self.test_top5_acc_record = open('%s/%stest-top5-acc.txt' % (self.SummaryPath, prefix), 'w+')
             self.lr_record = open('%s/%slr.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_best_top1_acc_record = open('%s/%sepoch-best-top1-acc.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_best_top5_acc_record = open('%s/%sepoch-best-top5-acc.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_test_top1_acc_record = open('%s/%sepoch-test-top1-acc.txt' % (self.SummaryPath, prefix), 'w+')
+            self.epoch_test_top5_acc_record = open('%s/%sepoch-test-top5-acc.txt' % (self.SummaryPath, prefix), 'w+')
 
     def update(self, loss, acc, batch_size=0, cur_lr=1e-3, end=None, is_train = True):
 
@@ -123,6 +127,9 @@ class Recorder():
             else:
                 # pass
                 self.test_acc_top1, self.test_acc_top5 = acc[0], acc[1]
+                self.epoch_test_top1_acc_record.write('%d, %.3f\n' % (self.epoch, self.test_acc_top1))
+                self.epoch_best_top5_acc_record.write('%d, %.3f\n' % (self.epoch, self.test_acc_top5))
+                self.flush([self.epoch_test_top1_acc_record, self.epoch_test_top5_acc_record])
 
                 if self.best_test_acc_top1 < self.test_acc_top1 or self.best_test_acc_top5 < self.test_acc_top5:
                     self.best_test_acc_top1 = self.test_acc_top1
@@ -177,6 +184,10 @@ class Recorder():
             self.test_top1_acc_record.close()
             self.test_top5_acc_record.close()
             self.lr_record.close()
+            self.epoch_best_top1_acc_record.close()
+            self.epoch_best_top5_acc_record.close()
+            self.epoch_test_top1_acc_record.close()
+            self.epoch_test_top5_acc_record.close()
 
 
     def get_best_test_acc(self):
@@ -189,6 +200,8 @@ class Recorder():
         else:
             print('Best test top1 acc: %.3f, top5 acc: %.3f'
                   % (self.best_test_acc_top1, self.best_test_acc_top5))
+            self.epoch_best_top1_acc_record.write('%d, %.3f\n' % (self.epoch, self.best_test_acc_top1))
+            self.epoch_best_top5_acc_record.write('%d, %.3f\n' % (self.epoch, self.best_test_acc_top5))
             return (self.best_test_acc_top1, self.best_test_acc_top5)
 
     def reset_best_test_acc(self):

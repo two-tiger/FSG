@@ -13,9 +13,9 @@
             "justMyCode": false,
             "args": [
                 "-m",
-                "ResNet44",
+                "ResNet18",
                 "-d",
-                "CIFAR10",
+                "ImageNet",
                 "-q",
                 "dorefa",
                 "-bw",
@@ -29,7 +29,9 @@
                 "-lr",
                 "1e-3",
                 "-n",
-                "100"
+                "100",
+                // "--use_lora"
+                "--break_continue"
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"
