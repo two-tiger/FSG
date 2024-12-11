@@ -167,6 +167,7 @@ def get_dataloader(dataset_name, split, batch_size, shuffle = True, num_workers=
         #                                          num_workers = num_workers, pin_memory=True)
         
         imagenet_dir = '/root/pubdatasets/ILSVRC2012'
+        # imagenet_dir = '/home/bingxing2/public/imagenet2012/ImageNet_ILSVRC2012'
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                         std=[0.229, 0.224, 0.225])
         crop_scale = 0.08

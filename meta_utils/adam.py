@@ -124,10 +124,10 @@ class Adam(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is None:
+                if p.grad is None: # 如果参数p的梯度不存在则跳过当前参数
                     continue
                 grad = p.grad.data
-                if grad.is_sparse:
+                if grad.is_sparse: # 如果梯度是稀疏的 不支持
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 

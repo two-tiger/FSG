@@ -70,6 +70,12 @@ parser.add_argument('--weight_decay', '-decay', type=float, default=0,
 parser.add_argument('--use_lora', action='store_true', default=False)
 parser.add_argument('--checkpoint_dir', type=str, default='./checkpoint')
 parser.add_argument('--break_continue', action='store_true', default=False)
+parser.add_argument('--a32', action='store_true', default=False)
+parser.add_argument('--expand', type=int, default=100, help='Mamba expand')
+parser.add_argument('--d_state', type=int, default=16, help='Mamba d_state')
+parser.add_argument('--d_conv', type=int, default=8, help='Mamba d_conv')
+parser.add_argument('--alpha', type=float, default=0.9, help='momentum')
+parser.add_argument('--length', type=float, default=5, help='history gradient length')
 args = parser.parse_args()
 
 # ------------------------------------------
@@ -87,6 +93,8 @@ random_type = args.random
 lr_adjust = args.lr_adjust
 batch_size = args.batch_size
 bitW = args.bitW
+alpha = args.alpha
+length = args.length
 quantized_type = args.quantize
 save_root = './Results/%s-%s' % (model_name, dataset_name)
 checkpoint_dir = './checkpoint/%s-%s' % (model_name, dataset_name)
@@ -104,13 +112,15 @@ gVar.meta_count = 0
 # Initial Network #
 ###################
 if model_name == 'ResNet20':
-    net = resnet20_cifar(bitW=bitW)
+    net = resnet20_cifar(bitW=bitW, alpha=alpha)
 elif model_name == 'ResNet32':
-    net = resnet32_cifar(bitW=bitW)
+    net = resnet32_cifar(bitW=bitW, alpha=alpha)
 elif model_name == 'ResNet56':
-    net = resnet56_cifar(num_classes=100, bitW=bitW)
+    net = resnet56_cifar(num_classes=100, bitW=bitW, alpha=alpha)
 elif model_name == 'ResNet44':
-    net = resnet44_cifar(bitW=bitW)
+    net = resnet44_cifar(bitW=bitW, alpha=alpha)
+elif model_name == 'ResNet110':
+    net = resnet110_cifar(num_classes=100, bitW=bitW, alpha=alpha)
 elif model_name == 'ResNet18':
     if args.dataset == 'CIFAR10':
         net = resnet18(bitW=bitW, num_classes=10)
@@ -121,8 +131,9 @@ else:
     raise NotImplementedError
 
 localtime = time.strftime("%m-%d-%H:%M:%S", time.localtime())
+# localtime = time.strftime("%Y-%m-%d", time.localtime())
 
-if model_name in ['ResNet20', 'ResNet32', 'ResNet56', 'ResNet44'] and not break_continue:
+if model_name in ['ResNet20', 'ResNet32', 'ResNet56', 'ResNet44', 'ResNet110'] and not break_continue:
     pretrain_path = '%s/%s-%s-pretrain.pth' % (save_root, model_name, dataset_name)
     net.load_state_dict(torch.load(pretrain_path, map_location=device), strict=False)
 elif model_name in ['ResNet18'] and not break_continue:
@@ -190,9 +201,9 @@ test_loader = get_dataloader(dataset_name, 'test', 100)
 if meta_method in ['LSTMFC-Grad', 'LSTMFC', 'LSTMFC-merge','LSTMFC-momentum']:
     meta_net = MetaLSTMFC(hidden_size=hidden_size)
     SummaryPath = '%s/runs-Quant/Meta-%s-Nonlinear-%s-' \
-                  'hidden-size-%d-nlstm-1-%s-%s-%dbits-lr-%s-batchsize-%s' \
+                  'hidden-size-%d-nlstm-1-%s-%s-%dbits-lr-%s-batchsize-%s-%s' \
                   % (save_root, meta_method, args.meta_nonlinear, hidden_size,
-                     quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH)
+                     quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH, localtime)
 elif meta_method in ['FC-Grad']:
     meta_net = MetaFC(hidden_size=hidden_size, use_nonlinear=args.meta_nonlinear)
     SummaryPath = '%s/runs-Quant/Meta-%s-Nonlinear-%s-' \
@@ -265,7 +276,10 @@ elif meta_method == 'MetaS5Fusion':
     SummaryPath = '%s/runs-Quant/%s-%s-%s-%dbits-lr-%s-batchsize-%s-%s' \
                   % (save_root, meta_method, quantized_type, optimizer_type, bitW, lr_adjust, MAX_EPOCH, localtime)
 elif meta_method == 'MetaFastAndSlow':
-    slow_meta_net = MetaMambaHistory(num_layers=len(layer_name_list), d_model=1, d_state=16, d_conv=8, expand=100)
+    if args.dataset == 'ImageNet':
+        slow_meta_net = MambaForImageNet(num_layers=len(layer_name_list), d_model=1, d_state=16, d_conv=8, expand=100)
+    else:
+        slow_meta_net = MetaMambaHistory(num_layers=len(layer_name_list), d_model=1, d_state=args.d_state, d_conv=args.d_conv, expand=args.expand)
     fast_meta_net = MetaMultiFC(hidden_size=hidden_size, use_nonlinear=args.meta_nonlinear)
     # slow_meta_net = nn.DataParallel(slow_meta_net)
     # fast_meta_net = nn.DataParallel(fast_meta_net)
@@ -295,7 +309,7 @@ if meta_method in ['MetaFastAndSlow', 'MetaFastAndLSTM', 'MetaMambaAndFC']:
         slow_meta_net.cuda()
         fast_meta_net.cuda()
     slow_meta_optimizer = optim.Adam(slow_meta_net.parameters(), lr=1e-3, weight_decay=args.weight_decay)
-    fast_meta_optimizer = optim.Adam(fast_meta_net.parameters(), lr=1e-3, weight_decay=args.weight_decay)
+    fast_meta_optimizer = optim.Adam(fast_meta_net.parameters(), lr=1e-2, weight_decay=args.weight_decay)
 else:
     print(meta_net)
     if use_cuda:
@@ -377,6 +391,7 @@ recorder = Recorder(SummaryPath=SummaryPath, dataset_name=dataset_name)
 # Begin Training #
 ##################
 meta_grad_dict = dict()
+start_time = time.time()
 for epoch in range(start_epoch, MAX_EPOCH):
 
     if recorder.stop: break
@@ -411,7 +426,7 @@ for epoch in range(start_epoch, MAX_EPOCH):
                 if use_lora:
                     fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_gradient_lora_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict)
                 else:
-                    fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict)
+                    fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad, False, meta_hidden_state_dict, length=length)
             elif meta_method in ['MetaDualGrad']:
                 fast_meta_grad_dict, slow_meta_grad_dict, history_grad, meta_hidden_state_dict = dual_gradient_generation(meta_net, net, meta_method, history_grad, False)
             else:
@@ -506,33 +521,34 @@ for epoch in range(start_epoch, MAX_EPOCH):
         # recorder.print_training_result(batch_idx, len(train_loader))
         end = time.time()
         
-    net_checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': net.state_dict(),
-        'optimizer_state_dict': optimizee.state_dict(),
-    }
-    for layer_info in layer_name_list:
-        layer_name = layer_info[0]
-        layer_idx = layer_info[1]
-        layer = get_layer(net, layer_idx)
-        net_checkpoint[layer_name+'quantized_grads'] = layer.quantized_grads
-        net_checkpoint[layer_name+'pre_quantized_weight'] = layer.pre_quantized_weight
-        net_checkpoint[layer_name+'bias_grad'] = layer.bias_grad
-    torch.save(net_checkpoint, '%s/net_checkpoint.pth' % checkpoint_dir)
-    slow_checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': slow_meta_net.state_dict(),
-        'optimizer_state_dict': slow_meta_optimizer.state_dict(),
-    }
-    torch.save(slow_checkpoint, '%s/slow_checkpoint.pth' % checkpoint_dir)
-    fast_checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': fast_meta_net.state_dict(),
-        'optimizer_state_dict': fast_meta_optimizer.state_dict(),
-    }
-    torch.save(fast_checkpoint, '%s/fast_checkpoint.pth' % checkpoint_dir)
+    # net_checkpoint = {
+    #     'epoch': epoch,
+    #     'model_state_dict': net.state_dict(),
+    #     'optimizer_state_dict': optimizee.state_dict(),
+    # }
+    # for layer_info in layer_name_list:
+    #     layer_name = layer_info[0]
+    #     layer_idx = layer_info[1]
+    #     layer = get_layer(net, layer_idx)
+    #     net_checkpoint[layer_name+'quantized_grads'] = layer.quantized_grads
+    #     net_checkpoint[layer_name+'pre_quantized_weight'] = layer.pre_quantized_weight
+    #     net_checkpoint[layer_name+'bias_grad'] = layer.bias_grad
+    # torch.save(net_checkpoint, '%s/net_checkpoint.pth' % checkpoint_dir)
+    # slow_checkpoint = {
+    #     'epoch': epoch,
+    #     'model_state_dict': slow_meta_net.state_dict(),
+    #     'optimizer_state_dict': slow_meta_optimizer.state_dict(),
+    # }
+    # torch.save(slow_checkpoint, '%s/slow_checkpoint.pth' % checkpoint_dir)
+    # fast_checkpoint = {
+    #     'epoch': epoch,
+    #     'model_state_dict': fast_meta_net.state_dict(),
+    #     'optimizer_state_dict': fast_meta_optimizer.state_dict(),
+    # }
+    # torch.save(fast_checkpoint, '%s/fast_checkpoint.pth' % checkpoint_dir)
     # if epoch % 5 == 0:
     #     draw_weight_distribution(net, epoch)
+    
     test_acc = test(net, quantized_type=quantized_type, test_loader=test_loader,
                     dataset_name=dataset_name, n_batches_used=None)
     bta_epoch = recorder.get_best_test_acc()
@@ -541,6 +557,8 @@ for epoch in range(start_epoch, MAX_EPOCH):
     # Adjust learning rate
     recorder.adjust_lr(optimizer=optimizee, adjust_type=lr_adjust, epoch=epoch)
 
+end_time = time.time()
+print('total time: %.1f' % ((end_time-start_time)/60))
 best_test_acc = recorder.get_best_test_acc()
 if type(best_test_acc) == tuple:
     print('Best test top 1 acc: %.3f, top 5 acc: %.3f' % (best_test_acc[0], best_test_acc[1]))

@@ -108,7 +108,6 @@ back.txt
 .DS_Store
 
 /datasets
-Results
 /*.pdf
 full_precision
 test.ipynb
@@ -119,3 +118,11 @@ visualization
 mamba_ssm-1.2.0.post1+cu118torch2.0cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
 checkpoint/
+need_to_save/
+*.sh
+loss_cur.ipynb
+Results/ResNet18-ImageNet
+Results/ResNet18-CIFAR10
+Results/ResNet20-CIFAR10/ResNet20-CIFAR10-pretrain-new.pth
+Results/ResNet*/runs-Quant
+Results/ResNet*/runs-Quant-Multiple

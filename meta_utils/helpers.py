@@ -379,7 +379,7 @@ def metassm_gradient_generation(meta_net, net, meta_method, history_grad=None, c
     return meta_grad_dict, history_grad, new_conv_state_dict, new_ssm_state_dict, new_s4_state_dict
 
 
-def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad=None, fix_meta=False, meta_hidden_state_dict=None):
+def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_method, history_grad=None, fix_meta=False, meta_hidden_state_dict=None, length=5):
     
     '''
     类似momentum这种具有历史信息的梯度被认为是slow grad使用SSM、LSTM建模；当前的梯度直接用FC进行建模
@@ -426,17 +426,20 @@ def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_m
             grad_in = grad.data.view(1, -1, 1)
             weight_in = pre_quantized_weight.data.view(1, -1, 1)
             
-            padding_size = 400 - grad_in.shape[1] % 400
-            padding_weight = torch.cat([grad_in, torch.zeros(1, padding_size, 1).cuda()], dim=1)
-            grad_in = padding_weight.view(1, -1, 400) # 1, l, 200
+            # padding_size = 200 - grad_in.shape[1] % 200
+            # padding_weight = torch.cat([grad_in, torch.zeros(1, padding_size, 1).cuda()], dim=1)
+            # grad_in = padding_weight.view(1, -1, 200) # 1, l, 200
             
             b,l,d = grad_in.shape
             
             if history_grad is not None and layer_name in history_grad:
                 his_grad = history_grad[layer_name]
                 # new_grad = 0.3 * his_grad + (1 - 0.3) * grad_in
-                if his_grad.shape[1]/l == 5:
-                    his_grad = torch.cat((his_grad[:,-l*4:,:], grad_in), 1)
+                if length == 1:
+                    his_grad = grad_in
+                elif his_grad.shape[1]/l == length:
+                    l_tmp = int(l*(length-1))
+                    his_grad = torch.cat((his_grad[:,-l_tmp:,:], grad_in), 1)
                 else:
                     his_grad = torch.cat((his_grad, grad_in), 1)
             else:
@@ -449,8 +452,8 @@ def meta_fast_slow_gradient_generation(fast_meta_net, slow_meta_net, net, meta_m
             else:
                 slow_meta_output = slow_meta_net(his_grad, idx)
 
-            slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].reshape(1, -1, 1)[:, :-padding_size, :]
-            # slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].view(1, -1, 1)
+            # slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].reshape(1, -1, 1)[:, :-padding_size, :]
+            slow_meta_output = slow_meta_output[:, -grad_in.shape[1]:, :].view(1, -1, 1)
             # meta_grad = grad_in * slow_meta_output
             slow_meta_grad = slow_meta_output
             

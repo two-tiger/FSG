@@ -19,7 +19,7 @@ import torch.optim as optim
 ################
 # Import Model #
 ################
-from models_CIFAR.quantized_resnet import resnet20_cifar, resnet20_stl, resnet56_cifar
+from models_CIFAR.quantized_resnet import resnet20_cifar, resnet32_cifar, resnet56_cifar, resnet44_cifar, resnet110_cifar
 # from models_ImageNet.quantized_resnet import resnet18, resnet34, resnet50
 
 # ---------------------------- Configuration --------------------------
@@ -67,12 +67,14 @@ test_loader = get_dataloader(dataset_name, 'test', 100)
 ###################
 if model_name == 'ResNet20':
     net = resnet20_cifar(bitW=bitW)
-# elif model_name == 'ResNet18':
-#     net = resnet18(bitW=bitW, quantized_head_tail=quantized_head_tail)
-# elif model_name == 'ResNet34':
-#     net = resnet34(bitW=bitW, quantized_head_tail=quantized_head_tail)
-# elif model_name == 'ResNet50':
-#     net = resnet50(bitW=bitW, quantized_head_tail=quantized_head_tail)
+elif model_name == 'ResNet32':
+    net = resnet32_cifar(bitW=bitW)
+elif model_name == 'ResNet44':
+    net = resnet44_cifar(bitW=bitW)
+elif model_name == 'ResNet56':
+    net = resnet56_cifar(bitW=bitW, num_classes=100)
+elif model_name == 'ResNet110':
+    net = resnet110_cifar(bitW=bitW, num_classes=100)
 else:
     raise NotImplementedError
 

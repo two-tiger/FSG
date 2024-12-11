@@ -239,7 +239,7 @@ class Recorder():
                   %(self.train_loss, self.smallest_training_loss, self.ascend_count))
 
         if adjust_type == 'adaptive':
-            if self.ascend_count >= 3:
+            if self.ascend_count >= 5:
                 self.ascend_count = 0
                 change_flag = True
                 optimizer.param_groups[0]['lr'] *= 0.1

@@ -13,7 +13,7 @@ import utils.global_var as gVar
 class MetaQuantConv(nn.Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True, bitW = 2, layer_name=None):
+                 padding=0, dilation=1, groups=1, bias=True, bitW = 2, layer_name=None, alpha=0.9):
         super(MetaQuantConv, self).__init__()
 
         gVar.meta_count += 1
@@ -21,6 +21,7 @@ class MetaQuantConv(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
+        self.alpha_mo = alpha
 
         self.weight = nn.Parameter(torch.Tensor(
                 out_channels, in_channels // groups, kernel_size, kernel_size))
@@ -76,6 +77,10 @@ class MetaQuantConv(nn.Module):
         return hook
 
     def forward(self, x, quantized_type = None, meta_grad = None, slow_grad = None, lr = 1e-3):
+        if not gVar.a32:
+            # x = Function_BWN.apply(x)
+            x = (x / torch.max(torch.abs(x))) * 0.5 + 0.5 # 预处理函数
+            x = 2 * Function_STE.apply(x, self.bitW) - 1 # 量化函数
 
         # 校准
         if quantized_type == 'dorefa':
@@ -101,7 +106,8 @@ class MetaQuantConv(nn.Module):
                                     + (self.weight.grad.data - self.calibrated_grads.data).detach())
             else:
                 # 带momentum的SGD
-                self.meta_weight = self.weight - lr * (0.9 * slow_grad[1] + (1 - 0.9) * self.calibrated_grads)
+                self.meta_weight = self.weight - lr * (self.alpha_mo * slow_grad[1] + (1 - self.alpha_mo) * self.calibrated_grads)
+                # self.meta_weight = self.weight + self.alpha_mo * slow_grad[1] - lr * self.calibrated_grads
                 
                 # Adam 的更新规则
                 # self.meta_weight = self.weight - lr * (self.calibrated_grads / (torch.sqrt(slow_grad[1] ** 2) + 1e-6))
@@ -124,9 +130,10 @@ class MetaQuantConv(nn.Module):
             self.pre_quantized_weight = (temp_weight / torch.max(torch.abs(temp_weight.data))) * 0.5 + 0.5 # 预处理函数
             self.quantized_weight = 2 * Function_STE.apply(self.pre_quantized_weight, self.bitW) - 1 # 量化函数
         elif quantized_type == 'BWN':
-            self.alpha = torch.mean(torch.abs(self.meta_weight.data))
+            # self.alpha = torch.mean(torch.abs(self.meta_weight.data))
             self.pre_quantized_weight = self.meta_weight * 1.0
-            self.quantized_weight = self.alpha.data * Function_BWN.apply(self.pre_quantized_weight)
+            # self.quantized_weight = self.alpha.data * Function_BWN.apply(self.pre_quantized_weight)
+            self.quantized_weight = Function_BWN.apply(self.pre_quantized_weight)
         elif quantized_type == 'BWN-F':
             self.alpha = torch.abs(self.weight.data).mean(-1).mean(-1).mean(-1).view(-1, 1, 1, 1)
             self.pre_quantized_weight = self.meta_weight * 1.0
@@ -147,13 +154,14 @@ class MetaQuantConv(nn.Module):
 
 class MetaQuantLinear(nn.Module):
 
-    def __init__(self, in_features, out_features, bias=True, bitW = 2):
+    def __init__(self, in_features, out_features, bias=True, bitW = 2, alpha=0.9):
         super(MetaQuantLinear, self).__init__()
 
         gVar.meta_count += 1
 
         self.in_features = in_features
         self.out_features = out_features
+        self.alpha_mo = alpha
 
         self.weight = nn.Parameter(torch.zeros([self.out_features, self.in_features]))
         if bias:
@@ -206,11 +214,14 @@ class MetaQuantLinear(nn.Module):
 
 
     def forward(self, x, quantized_type = None, meta_grad = None, slow_grad = None, lr=1e-3):
+        if not gVar.a32:
+            x = Function_BWN.apply(x)
 
         if quantized_type == 'dorefa':
             self.calibration = 1.0 / (torch.max(torch.abs(torch.tanh(self.weight.data))).detach()) \
                                * (1 - torch.pow(torch.tanh(self.weight.data), 2)).detach()
         elif quantized_type in ['BWN', 'BWN-F']:
+            # self.calibration = torch.mean(torch.abs(self.weight.data))
             self.calibration = 1.0
         else:
             self.calibration = 1.0
@@ -220,11 +231,10 @@ class MetaQuantLinear(nn.Module):
             self.calibrated_grads = meta_grad[1] * self.calibration
 
             if slow_grad is None:
-                self.meta_weight = self.weight - \
-                                            lr * (self.calibrated_grads \
-                                    + (self.weight.grad.data - self.calibrated_grads.data).detach())
+                self.meta_weight = self.weight - lr * (self.calibrated_grads + (self.weight.grad.data - self.calibrated_grads.data).detach())
             else:
-                self.meta_weight = self.weight - lr * (0.9 * slow_grad[1] + (1 - 0.9) * self.calibrated_grads)
+                self.meta_weight = self.weight - lr * (self.alpha_mo * slow_grad[1] + (1 - self.alpha_mo) * self.calibrated_grads)
+                # self.meta_weight = self.weight + self.alpha_mo * slow_grad[1] - lr * self.calibrated_grads
                 
                 # Adam 的更新规则
                 # self.meta_weight = self.weight - lr * (self.calibrated_grads / (torch.sqrt(slow_grad[1] ** 2) + 1e-6))
@@ -249,10 +259,11 @@ class MetaQuantLinear(nn.Module):
             # print('The number of quantized weights 1: ', (self.quantized_weight == 1).sum().item())
         elif quantized_type in ['BWN', 'BWN-F']:
             # self.alpha = torch.sum(torch.abs(self.meta_weight.data)) / self.n_elements
-            self.alpha = torch.mean(torch.abs(self.meta_weight.data))
+            # self.alpha = torch.mean(torch.abs(self.meta_weight.data))
             self.pre_quantized_weight = self.meta_weight * 1.0
             # self.alpha = torch.mean(torch.abs(self.pre_quantized_weight.data))
-            self.quantized_weight = self.alpha * Function_BWN.apply(self.pre_quantized_weight)
+            # self.quantized_weight = self.alpha * Function_BWN.apply(self.pre_quantized_weight)
+            self.quantized_weight = Function_BWN.apply(self.pre_quantized_weight)
         else:
             self.quantized_weight = self.meta_weight * 1.0
 
