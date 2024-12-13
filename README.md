@@ -45,3 +45,8 @@ Cite the paper if anything helps you:
 ```angular2
 
 ```
+
+## Acknowledgements
+Our project referenced the code of the following repositories. We sincerely thanks to offering useful public code base.
+
+* [MetaQuant](https://github.com/csyhhu/MetaQuant)
